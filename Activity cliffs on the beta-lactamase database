@@ -1,0 +1,995 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "kernelspec": {
+      "display_name": "Python 3",
+      "language": "python",
+      "name": "python3"
+    },
+    "language_info": {
+      "codemirror_mode": {
+        "name": "ipython",
+        "version": 3
+      },
+      "file_extension": ".py",
+      "mimetype": "text/x-python",
+      "name": "python",
+      "nbconvert_exporter": "python",
+      "pygments_lexer": "ipython3",
+      "version": "3.7.7"
+    },
+    "colab": {
+      "name": "Open Bioinformatics Research Project v2.ipynb",
+      "provenance": [],
+      "collapsed_sections": [],
+      "include_colab_link": true
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/rflameiro/projects/blob/main/Open_Bioinformatics_Research_Project.ipynb\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "LMPNQ3uhso--"
+      },
+      "source": [
+        "# Activity cliffs on the beta-lactamase database\n",
+        "\n",
+        "In this Notebook, we will explore the presence of activity cliffs on the beta-lactamase database\n",
+        "\n",
+        "Activity cliffs occur when compounds with similar molecular structures have great activity differences.\n",
+        "\n",
+        "This type of relationship between compounds break the QSAR assumption that \"small changes in molecular structure lead to small changes in the measured property\". It is important to identify activity cliffs as they may present useful information, such as the sensitivity of a molecular target to stereochemistry changes in the inhibitor, or the size of an enzyme pocket (for instance, if activity drops by changing a methyl group to an ethyl, it is likely that the enzyme pocket cannot physically accomodate the ethyl group).\n",
+        "\n",
+        "Let's start by downloading useful packages:\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "TqZdLiocs0Pd"
+      },
+      "source": [
+        "!pip3 install rdkit-pypi\n",
+        "!pip install networkx\n",
+        "!pip install bokeh"
+      ],
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "lGJM6UncB6l2"
+      },
+      "source": [
+        "## Import dataset and generate molecular fingerprints"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "JqMRe11Eso_F"
+      },
+      "source": [
+        "import numpy as np\n",
+        "import os\n",
+        "import pandas as pd"
+      ],
+      "execution_count": 2,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "zJ7LxhmTso_H",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": ""
+      },
+      "source": [
+        "from google.colab import drive\n",
+        "drive.mount('/content/gdrive')"
+      ],
+      "execution_count": 3,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Mounted at /content/gdrive\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "qtjfJjrmso_H"
+      },
+      "source": [
+        "# Store all CSV files in a list\n",
+        "import glob\n",
+        "\n",
+        "all_csv = glob.glob('/content/gdrive/My Drive/Colab Notebooks/beta_lactamase_CHEMBL29/*.csv')"
+      ],
+      "execution_count": 4,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "VF7rsu4xso_I"
+      },
+      "source": [
+        "# Combine contents of all CSV files into a single DataFrame\n",
+        "df = pd.concat((pd.read_csv(csv)) for csv in all_csv)"
+      ],
+      "execution_count": 5,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "Bh81YCrAso_I"
+      },
+      "source": [
+        "# Non-missing data with pChEMBL value\n",
+        "df2 = df[df.pchembl_value.notnull()]"
+      ],
+      "execution_count": 6,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "Vz7bFspbso_J"
+      },
+      "source": [
+        "# Remove duplicates, keeping the most active instance\n",
+        "df2 = df2.sort_values(\"pchembl_value\", ascending=False)\n",
+        "df2 = df2.drop_duplicates(subset=\"canonical_smiles\").reset_index(drop=True)"
+      ],
+      "execution_count": 7,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "SV1kNmh3so_M"
+      },
+      "source": [
+        "from rdkit import Chem\n",
+        "from rdkit.Chem import AllChem\n",
+        "from rdkit import DataStructs\n",
+        "from rdkit.Chem import Draw"
+      ],
+      "execution_count": 8,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "RMujf8_hso_N"
+      },
+      "source": [
+        "# Calculate RDKit Mol from SMILES\n",
+        "df2[\"rdkit_mol\"] = df2[\"canonical_smiles\"].astype(\"str\").apply(Chem.MolFromSmiles)"
+      ],
+      "execution_count": 9,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "E_XHya9dso_N",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": "36e6dd09-ecda-4bb2-8331-c6f239904d70"
+      },
+      "source": [
+        "# Remove failed conversions\n",
+        "df2 = df2[df2.rdkit_mol.notnull()].reset_index(drop=True)\n",
+        "print(f\"Number of valid structures in the dataset: {len(df2)}\")"
+      ],
+      "execution_count": 10,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Number of valid structures in the dataset: 63022\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "lOgkLYAEso_O"
+      },
+      "source": [
+        "# Calculate Morgan fingerprints\n",
+        "df2[\"Morgan\"] = df2[\"rdkit_mol\"].apply(lambda mol: AllChem.GetMorganFingerprintAsBitVect(mol, 3, nBits=1024))"
+      ],
+      "execution_count": 11,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "yIWhSzghso_O"
+      },
+      "source": [
+        "## Finding activity cliffs\n",
+        "\n",
+        "Now, for the identification of activity cliffs, let's loop over all pairs of activities and, only if the difference in activities is greater than 2.0, we will check the Tanimoto similarity.\n",
+        "\n",
+        "For this analysis, we will be assuming that molecules representing an activity cliff need to have at least a 100x difference in activity (pChEMBL value difference of 2.0 (remember that pChEMBL represents log units) and a Tanimoto similarity greater than 0.8.\n",
+        "\n",
+        "This is not the only definition of activity cliff, as you could also use, for instance, molecular pairs derived from Bemis-Murcko scaffolds."
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "uavVeqF5so_P",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": "e48f2702-ef97-4934-a76c-6c4be14b401b"
+      },
+      "source": [
+        "%%time\n",
+        "# Calculate activity cliffs\n",
+        "\n",
+        "# List of indexes of cliff pairs\n",
+        "cliffs = []\n",
+        "\n",
+        "# Convert Pandas column to np.array for faster and more intuitive indexing\n",
+        "fps = np.array(df2[\"Morgan\"])\n",
+        "\n",
+        "# np.array with activity values\n",
+        "pchembl = np.array(df2[\"pchembl_value\"])  \n",
+        "\n",
+        "# np.array with activity values + 2.0 for faster comparison\n",
+        "# This way, we don't need to add or subtract 2.0 for each comparison\n",
+        "pchembl2 = pchembl + 2  # note that this syntax is possible with np.arrays, but not lists\n",
+        "\n",
+        "# Loop over all activity pairs\n",
+        "for i in range(len(fps)):\n",
+        "    for j in range(i+1, len(fps)):\n",
+        "        # Calculate Tanimoto index only if activity difference is >= 2.0\n",
+        "        if pchembl[i] >= pchembl2[j]:\n",
+        "            sim = DataStructs.FingerprintSimilarity(fps[i], fps[j], metric=DataStructs.TanimotoSimilarity)\n",
+        "            if (sim > 0.8):\n",
+        "                cliffs.append((i,j))"
+      ],
+      "execution_count": 12,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "CPU times: user 24min 46s, sys: 2.52 s, total: 24min 48s\n",
+            "Wall time: 24min 50s\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "4LuDS_IHso_P",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": "0236f87d-a1ef-4edf-f6c7-3e585c7199bc"
+      },
+      "source": [
+        "# Number of cliffs found\n",
+        "print(f\"{len(cliffs)} activity cliffs were found\")"
+      ],
+      "execution_count": 13,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "212 activity cliffs were found\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "kWpP-4N87It0"
+      },
+      "source": [
+        "Our code has found **212 activity cliffs**, pairs of molecular structures with an activity difference greater than or equal to 2.0. That is too much to visualize individually, so let's create an image to represent this chemical space.\n",
+        "\n",
+        "Since we would like to visualize relationships between compounds (that is, if two compounds form an activity cliff), a good choice of representation would be a set of graphs. We can build graphs using the Python module `networkx`. \n",
+        "\n",
+        "Each node in our set of graphs will represent a molecular structure, and it will be colored according to its activity value. We will also represent an activity cliff relationship between two compounds by connecting the nodes with a line (edge).\n",
+        "\n",
+        "Finally, we will plot the resulting graphs using `bokeh`, a Python module that allows for interactive plots.\n",
+        "\n",
+        "Inspiration for this representation comes from *J. Med. Chem.* 2010, 53, 23, 8209–8223. "
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "vMTuHGUm66Zc"
+      },
+      "source": [
+        "# Create list of unique indexes\n",
+        "cliff_indexes = []\n",
+        "  \n",
+        "for pair in cliffs:\n",
+        "    for i in pair:\n",
+        "        cliff_indexes.append(i)\n",
+        "\n",
+        "cliff_indexes = list(set(cliff_indexes))"
+      ],
+      "execution_count": 14,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 202
+        },
+        "id": "GjVz_rOc-Odz",
+        "outputId": "ae2145a7-360d-4f92-fd35-7c72b4c9e80b"
+      },
+      "source": [
+        "# Separate compounds involved in activity cliffs in another pd.DataFrame\n",
+        "cliff_df = df2.loc[cliff_indexes][[\"rdkit_mol\", \"pchembl_value\"]]\n",
+        "cliff_df.head()"
+      ],
+      "execution_count": 15,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/html": [
+              "<div>\n",
+              "<style scoped>\n",
+              "    .dataframe tbody tr th:only-of-type {\n",
+              "        vertical-align: middle;\n",
+              "    }\n",
+              "\n",
+              "    .dataframe tbody tr th {\n",
+              "        vertical-align: top;\n",
+              "    }\n",
+              "\n",
+              "    .dataframe thead th {\n",
+              "        text-align: right;\n",
+              "    }\n",
+              "</style>\n",
+              "<table border=\"1\" class=\"dataframe\">\n",
+              "  <thead>\n",
+              "    <tr style=\"text-align: right;\">\n",
+              "      <th></th>\n",
+              "      <th>rdkit_mol</th>\n",
+              "      <th>pchembl_value</th>\n",
+              "    </tr>\n",
+              "  </thead>\n",
+              "  <tbody>\n",
+              "    <tr>\n",
+              "      <th>55299</th>\n",
+              "      <td>&lt;rdkit.Chem.rdchem.Mol object at 0x7f24a8364ad0&gt;</td>\n",
+              "      <td>4.05</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>2063</th>\n",
+              "      <td>&lt;rdkit.Chem.rdchem.Mol object at 0x7f24b1cbaf30&gt;</td>\n",
+              "      <td>6.45</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>12306</th>\n",
+              "      <td>&lt;rdkit.Chem.rdchem.Mol object at 0x7f24a8688d00&gt;</td>\n",
+              "      <td>6.05</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>57368</th>\n",
+              "      <td>&lt;rdkit.Chem.rdchem.Mol object at 0x7f24a830e120&gt;</td>\n",
+              "      <td>4.00</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>10282</th>\n",
+              "      <td>&lt;rdkit.Chem.rdchem.Mol object at 0x7f24a86e0580&gt;</td>\n",
+              "      <td>6.15</td>\n",
+              "    </tr>\n",
+              "  </tbody>\n",
+              "</table>\n",
+              "</div>"
+            ],
+            "text/plain": [
+              "                                              rdkit_mol  pchembl_value\n",
+              "55299  <rdkit.Chem.rdchem.Mol object at 0x7f24a8364ad0>           4.05\n",
+              "2063   <rdkit.Chem.rdchem.Mol object at 0x7f24b1cbaf30>           6.45\n",
+              "12306  <rdkit.Chem.rdchem.Mol object at 0x7f24a8688d00>           6.05\n",
+              "57368  <rdkit.Chem.rdchem.Mol object at 0x7f24a830e120>           4.00\n",
+              "10282  <rdkit.Chem.rdchem.Mol object at 0x7f24a86e0580>           6.15"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 15
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "6wHVzKZtBcmN"
+      },
+      "source": [
+        "## Use networkx to create a graph of our activity cliff dataset"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "hqBG0C4KJh0n"
+      },
+      "source": [
+        "import networkx as nx\n",
+        "import matplotlib.pyplot as plt\n",
+        "from sklearn.preprocessing import MinMaxScaler"
+      ],
+      "execution_count": 16,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "UyFGF4tdt8AT"
+      },
+      "source": [
+        "# Create graph object\n",
+        "G = nx.Graph()\n",
+        "\n",
+        "# Add nodes and define edges based on activity cliff pairs\n",
+        "G.add_nodes_from(cliff_df.index.to_list())\n",
+        "G.add_edges_from(cliffs)\n",
+        "\n",
+        "# Define node values for activity and color\n",
+        "pchembl_dict = {i:cliff_df.loc[i][\"pchembl_value\"] for i in cliff_df.index}\n",
+        "nx.set_node_attributes(G, name='activity', values=pchembl_dict)\n",
+        "# Color values will be derived from activity and mapped to a colormap\n",
+        "pchembl = np.array(cliff_df[\"pchembl_value\"])\n",
+        "colors = MinMaxScaler().fit_transform(pchembl.reshape(-1, 1))\n",
+        "cliff_df[\"colors\"] = colors\n",
+        "colors_dict = {i:cliff_df.loc[i][\"colors\"] for i in cliff_df.index}\n",
+        "nx.set_node_attributes(G, name='node_color', values=colors_dict)\n"
+      ],
+      "execution_count": 30,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "1B5ck4RtBkdK"
+      },
+      "source": [
+        "## Use bokeh to create an interactive representation"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "B3ay901XTFB1"
+      },
+      "source": [
+        "from bokeh.io import output_notebook, show, save\n",
+        "from bokeh.models import Range1d, Circle, MultiLine\n",
+        "from bokeh.plotting import figure, from_networkx\n",
+        "from bokeh.palettes import Viridis256\n",
+        "from bokeh.transform import linear_cmap"
+      ],
+      "execution_count": 18,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "-vJWC-GJZw5h"
+      },
+      "source": [
+        "output_notebook()  # Call this to output the plot on Google Colab"
+      ],
+      "execution_count": 19,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 617
+        },
+        "id": "5IOJfTxyTFpu",
+        "outputId": "133eaf90-61dd-422b-eabe-7edcdb073fe5"
+      },
+      "source": [
+        "# Make an Interactive Network Visualization with Bokeh\n",
+        "# https://melaniewalsh.github.io/Intro-Cultural-Analytics/06-Network-Analysis/02-Making-Network-Viz-with-Bokeh.html\n",
+        "\n",
+        "# Title\n",
+        "title = \"Activity cliffs on the beta-lactamase dataset\"\n",
+        "\n",
+        "# Establish which categories will appear when hovering over each node\n",
+        "HOVER_TOOLTIPS = [(\"Index\", \"@index\"), \n",
+        "                  (\"Activity\", \"@activity\")]\n",
+        "\n",
+        "# Create a plot — set dimensions, toolbar, and title\n",
+        "plot = figure(tooltips=HOVER_TOOLTIPS,\n",
+        "              tools=\"pan,wheel_zoom,save,reset\", active_scroll='wheel_zoom',\n",
+        "              x_range=Range1d(-10.1, 10.1), y_range=Range1d(-10.1, 10.1), title=title)\n",
+        "\n",
+        "# Create a network graph object with spring layout\n",
+        "# https://networkx.github.io/documentation/networkx-1.9/reference/generated/networkx.drawing.layout.spring_layout.html\n",
+        "network_graph = from_networkx(G, nx.spring_layout, scale=10, center=(0, 0))\n",
+        "\n",
+        "# Set node size and color\n",
+        "network_graph.node_renderer.glyph = Circle(size=10, fill_color=linear_cmap(\"node_color\", \"Viridis256\", 0, 1))\n",
+        "\n",
+        "# Set edge opacity and width\n",
+        "network_graph.edge_renderer.glyph = MultiLine(line_alpha=0.9, line_width=3)\n",
+        "\n",
+        "# Add network graph to the plot\n",
+        "plot.renderers.append(network_graph)\n",
+        "\n",
+        "show(plot)"
+      ],
+      "execution_count": 32,
+      "outputs": [
+        {
+          "output_type": "display_data",
+          "data": {
+            "application/javascript": [
+              "\n",
+              "(function(root) {\n",
+              "  function now() {\n",
+              "    return new Date();\n",
+              "  }\n",
+              "\n",
+              "  var force = true;\n",
+              "\n",
+              "  if (typeof root._bokeh_onload_callbacks === \"undefined\" || force === true) {\n",
+              "    root._bokeh_onload_callbacks = [];\n",
+              "    root._bokeh_is_loading = undefined;\n",
+              "  }\n",
+              "\n",
+              "  var JS_MIME_TYPE = 'application/javascript';\n",
+              "  var HTML_MIME_TYPE = 'text/html';\n",
+              "  var EXEC_MIME_TYPE = 'application/vnd.bokehjs_exec.v0+json';\n",
+              "  var CLASS_NAME = 'output_bokeh rendered_html';\n",
+              "\n",
+              "  /**\n",
+              "   * Render data to the DOM node\n",
+              "   */\n",
+              "  function render(props, node) {\n",
+              "    var script = document.createElement(\"script\");\n",
+              "    node.appendChild(script);\n",
+              "  }\n",
+              "\n",
+              "  /**\n",
+              "   * Handle when an output is cleared or removed\n",
+              "   */\n",
+              "  function handleClearOutput(event, handle) {\n",
+              "    var cell = handle.cell;\n",
+              "\n",
+              "    var id = cell.output_area._bokeh_element_id;\n",
+              "    var server_id = cell.output_area._bokeh_server_id;\n",
+              "    // Clean up Bokeh references\n",
+              "    if (id != null && id in Bokeh.index) {\n",
+              "      Bokeh.index[id].model.document.clear();\n",
+              "      delete Bokeh.index[id];\n",
+              "    }\n",
+              "\n",
+              "    if (server_id !== undefined) {\n",
+              "      // Clean up Bokeh references\n",
+              "      var cmd = \"from bokeh.io.state import curstate; print(curstate().uuid_to_server['\" + server_id + \"'].get_sessions()[0].document.roots[0]._id)\";\n",
+              "      cell.notebook.kernel.execute(cmd, {\n",
+              "        iopub: {\n",
+              "          output: function(msg) {\n",
+              "            var id = msg.content.text.trim();\n",
+              "            if (id in Bokeh.index) {\n",
+              "              Bokeh.index[id].model.document.clear();\n",
+              "              delete Bokeh.index[id];\n",
+              "            }\n",
+              "          }\n",
+              "        }\n",
+              "      });\n",
+              "      // Destroy server and session\n",
+              "      var cmd = \"import bokeh.io.notebook as ion; ion.destroy_server('\" + server_id + \"')\";\n",
+              "      cell.notebook.kernel.execute(cmd);\n",
+              "    }\n",
+              "  }\n",
+              "\n",
+              "  /**\n",
+              "   * Handle when a new output is added\n",
+              "   */\n",
+              "  function handleAddOutput(event, handle) {\n",
+              "    var output_area = handle.output_area;\n",
+              "    var output = handle.output;\n",
+              "\n",
+              "    // limit handleAddOutput to display_data with EXEC_MIME_TYPE content only\n",
+              "    if ((output.output_type != \"display_data\") || (!Object.prototype.hasOwnProperty.call(output.data, EXEC_MIME_TYPE))) {\n",
+              "      return\n",
+              "    }\n",
+              "\n",
+              "    var toinsert = output_area.element.find(\".\" + CLASS_NAME.split(' ')[0]);\n",
+              "\n",
+              "    if (output.metadata[EXEC_MIME_TYPE][\"id\"] !== undefined) {\n",
+              "      toinsert[toinsert.length - 1].firstChild.textContent = output.data[JS_MIME_TYPE];\n",
+              "      // store reference to embed id on output_area\n",
+              "      output_area._bokeh_element_id = output.metadata[EXEC_MIME_TYPE][\"id\"];\n",
+              "    }\n",
+              "    if (output.metadata[EXEC_MIME_TYPE][\"server_id\"] !== undefined) {\n",
+              "      var bk_div = document.createElement(\"div\");\n",
+              "      bk_div.innerHTML = output.data[HTML_MIME_TYPE];\n",
+              "      var script_attrs = bk_div.children[0].attributes;\n",
+              "      for (var i = 0; i < script_attrs.length; i++) {\n",
+              "        toinsert[toinsert.length - 1].firstChild.setAttribute(script_attrs[i].name, script_attrs[i].value);\n",
+              "        toinsert[toinsert.length - 1].firstChild.textContent = bk_div.children[0].textContent\n",
+              "      }\n",
+              "      // store reference to server id on output_area\n",
+              "      output_area._bokeh_server_id = output.metadata[EXEC_MIME_TYPE][\"server_id\"];\n",
+              "    }\n",
+              "  }\n",
+              "\n",
+              "  function register_renderer(events, OutputArea) {\n",
+              "\n",
+              "    function append_mime(data, metadata, element) {\n",
+              "      // create a DOM node to render to\n",
+              "      var toinsert = this.create_output_subarea(\n",
+              "        metadata,\n",
+              "        CLASS_NAME,\n",
+              "        EXEC_MIME_TYPE\n",
+              "      );\n",
+              "      this.keyboard_manager.register_events(toinsert);\n",
+              "      // Render to node\n",
+              "      var props = {data: data, metadata: metadata[EXEC_MIME_TYPE]};\n",
+              "      render(props, toinsert[toinsert.length - 1]);\n",
+              "      element.append(toinsert);\n",
+              "      return toinsert\n",
+              "    }\n",
+              "\n",
+              "    /* Handle when an output is cleared or removed */\n",
+              "    events.on('clear_output.CodeCell', handleClearOutput);\n",
+              "    events.on('delete.Cell', handleClearOutput);\n",
+              "\n",
+              "    /* Handle when a new output is added */\n",
+              "    events.on('output_added.OutputArea', handleAddOutput);\n",
+              "\n",
+              "    /**\n",
+              "     * Register the mime type and append_mime function with output_area\n",
+              "     */\n",
+              "    OutputArea.prototype.register_mime_type(EXEC_MIME_TYPE, append_mime, {\n",
+              "      /* Is output safe? */\n",
+              "      safe: true,\n",
+              "      /* Index of renderer in `output_area.display_order` */\n",
+              "      index: 0\n",
+              "    });\n",
+              "  }\n",
+              "\n",
+              "  // register the mime type if in Jupyter Notebook environment and previously unregistered\n",
+              "  if (root.Jupyter !== undefined) {\n",
+              "    var events = require('base/js/events');\n",
+              "    var OutputArea = require('notebook/js/outputarea').OutputArea;\n",
+              "\n",
+              "    if (OutputArea.prototype.mime_types().indexOf(EXEC_MIME_TYPE) == -1) {\n",
+              "      register_renderer(events, OutputArea);\n",
+              "    }\n",
+              "  }\n",
+              "\n",
+              "  \n",
+              "  if (typeof (root._bokeh_timeout) === \"undefined\" || force === true) {\n",
+              "    root._bokeh_timeout = Date.now() + 5000;\n",
+              "    root._bokeh_failed_load = false;\n",
+              "  }\n",
+              "\n",
+              "  var NB_LOAD_WARNING = {'data': {'text/html':\n",
+              "     \"<div style='background-color: #fdd'>\\n\"+\n",
+              "     \"<p>\\n\"+\n",
+              "     \"BokehJS does not appear to have successfully loaded. If loading BokehJS from CDN, this \\n\"+\n",
+              "     \"may be due to a slow or bad network connection. Possible fixes:\\n\"+\n",
+              "     \"</p>\\n\"+\n",
+              "     \"<ul>\\n\"+\n",
+              "     \"<li>re-rerun `output_notebook()` to attempt to load from CDN again, or</li>\\n\"+\n",
+              "     \"<li>use INLINE resources instead, as so:</li>\\n\"+\n",
+              "     \"</ul>\\n\"+\n",
+              "     \"<code>\\n\"+\n",
+              "     \"from bokeh.resources import INLINE\\n\"+\n",
+              "     \"output_notebook(resources=INLINE)\\n\"+\n",
+              "     \"</code>\\n\"+\n",
+              "     \"</div>\"}};\n",
+              "\n",
+              "  function display_loaded() {\n",
+              "    var el = document.getElementById(null);\n",
+              "    if (el != null) {\n",
+              "      el.textContent = \"BokehJS is loading...\";\n",
+              "    }\n",
+              "    if (root.Bokeh !== undefined) {\n",
+              "      if (el != null) {\n",
+              "        el.textContent = \"BokehJS \" + root.Bokeh.version + \" successfully loaded.\";\n",
+              "      }\n",
+              "    } else if (Date.now() < root._bokeh_timeout) {\n",
+              "      setTimeout(display_loaded, 100)\n",
+              "    }\n",
+              "  }\n",
+              "\n",
+              "\n",
+              "  function run_callbacks() {\n",
+              "    try {\n",
+              "      root._bokeh_onload_callbacks.forEach(function(callback) {\n",
+              "        if (callback != null)\n",
+              "          callback();\n",
+              "      });\n",
+              "    } finally {\n",
+              "      delete root._bokeh_onload_callbacks\n",
+              "    }\n",
+              "    console.debug(\"Bokeh: all callbacks have finished\");\n",
+              "  }\n",
+              "\n",
+              "  function load_libs(css_urls, js_urls, callback) {\n",
+              "    if (css_urls == null) css_urls = [];\n",
+              "    if (js_urls == null) js_urls = [];\n",
+              "\n",
+              "    root._bokeh_onload_callbacks.push(callback);\n",
+              "    if (root._bokeh_is_loading > 0) {\n",
+              "      console.debug(\"Bokeh: BokehJS is being loaded, scheduling callback at\", now());\n",
+              "      return null;\n",
+              "    }\n",
+              "    if (js_urls == null || js_urls.length === 0) {\n",
+              "      run_callbacks();\n",
+              "      return null;\n",
+              "    }\n",
+              "    console.debug(\"Bokeh: BokehJS not loaded, scheduling load and callback at\", now());\n",
+              "    root._bokeh_is_loading = css_urls.length + js_urls.length;\n",
+              "\n",
+              "    function on_load() {\n",
+              "      root._bokeh_is_loading--;\n",
+              "      if (root._bokeh_is_loading === 0) {\n",
+              "        console.debug(\"Bokeh: all BokehJS libraries/stylesheets loaded\");\n",
+              "        run_callbacks()\n",
+              "      }\n",
+              "    }\n",
+              "\n",
+              "    function on_error(url) {\n",
+              "      console.error(\"failed to load \" + url);\n",
+              "    }\n",
+              "\n",
+              "    for (let i = 0; i < css_urls.length; i++) {\n",
+              "      const url = css_urls[i];\n",
+              "      const element = document.createElement(\"link\");\n",
+              "      element.onload = on_load;\n",
+              "      element.onerror = on_error.bind(null, url);\n",
+              "      element.rel = \"stylesheet\";\n",
+              "      element.type = \"text/css\";\n",
+              "      element.href = url;\n",
+              "      console.debug(\"Bokeh: injecting link tag for BokehJS stylesheet: \", url);\n",
+              "      document.body.appendChild(element);\n",
+              "    }\n",
+              "\n",
+              "    const hashes = {\"https://cdn.bokeh.org/bokeh/release/bokeh-2.3.3.min.js\": \"dM3QQsP+wXdHg42wTqW85BjZQdLNNIXqlPw/BgKoExPmTG7ZLML4EGqLMfqHT6ON\", \"https://cdn.bokeh.org/bokeh/release/bokeh-tables-2.3.3.min.js\": \"8x57I4YuIfu8XyZfFo0XVr2WAT8EK4rh/uDe3wF7YuW2FNUSNEpJbsPaB1nJ2fz2\", \"https://cdn.bokeh.org/bokeh/release/bokeh-widgets-2.3.3.min.js\": \"3QTqdz9LyAm2i0sG5XTePsHec3UHWwVsrOL68SYRoAXsafvfAyqtQ+h440+qIBhS\"};\n",
+              "\n",
+              "    for (let i = 0; i < js_urls.length; i++) {\n",
+              "      const url = js_urls[i];\n",
+              "      const element = document.createElement('script');\n",
+              "      element.onload = on_load;\n",
+              "      element.onerror = on_error.bind(null, url);\n",
+              "      element.async = false;\n",
+              "      element.src = url;\n",
+              "      if (url in hashes) {\n",
+              "        element.crossOrigin = \"anonymous\";\n",
+              "        element.integrity = \"sha384-\" + hashes[url];\n",
+              "      }\n",
+              "      console.debug(\"Bokeh: injecting script tag for BokehJS library: \", url);\n",
+              "      document.head.appendChild(element);\n",
+              "    }\n",
+              "  };\n",
+              "\n",
+              "  function inject_raw_css(css) {\n",
+              "    const element = document.createElement(\"style\");\n",
+              "    element.appendChild(document.createTextNode(css));\n",
+              "    document.body.appendChild(element);\n",
+              "  }\n",
+              "\n",
+              "  \n",
+              "  var js_urls = [\"https://cdn.bokeh.org/bokeh/release/bokeh-2.3.3.min.js\", \"https://cdn.bokeh.org/bokeh/release/bokeh-widgets-2.3.3.min.js\", \"https://cdn.bokeh.org/bokeh/release/bokeh-tables-2.3.3.min.js\"];\n",
+              "  var css_urls = [];\n",
+              "  \n",
+              "\n",
+              "  var inline_js = [\n",
+              "    function(Bokeh) {\n",
+              "      Bokeh.set_log_level(\"info\");\n",
+              "    },\n",
+              "    function(Bokeh) {\n",
+              "    \n",
+              "    \n",
+              "    }\n",
+              "  ];\n",
+              "\n",
+              "  function run_inline_js() {\n",
+              "    \n",
+              "    if (root.Bokeh !== undefined || force === true) {\n",
+              "      \n",
+              "    for (var i = 0; i < inline_js.length; i++) {\n",
+              "      inline_js[i].call(root, root.Bokeh);\n",
+              "    }\n",
+              "    } else if (Date.now() < root._bokeh_timeout) {\n",
+              "      setTimeout(run_inline_js, 100);\n",
+              "    } else if (!root._bokeh_failed_load) {\n",
+              "      console.log(\"Bokeh: BokehJS failed to load within specified timeout.\");\n",
+              "      root._bokeh_failed_load = true;\n",
+              "    } else if (force !== true) {\n",
+              "      var cell = $(document.getElementById(null)).parents('.cell').data().cell;\n",
+              "      cell.output_area.append_execute_result(NB_LOAD_WARNING)\n",
+              "    }\n",
+              "\n",
+              "  }\n",
+              "\n",
+              "  if (root._bokeh_is_loading === 0) {\n",
+              "    console.debug(\"Bokeh: BokehJS loaded, going straight to plotting\");\n",
+              "    run_inline_js();\n",
+              "  } else {\n",
+              "    load_libs(css_urls, js_urls, function() {\n",
+              "      console.debug(\"Bokeh: BokehJS plotting callback run at\", now());\n",
+              "      run_inline_js();\n",
+              "    });\n",
+              "  }\n",
+              "}(window));"
+            ],
+            "application/vnd.bokehjs_load.v0+json": "\n(function(root) {\n  function now() {\n    return new Date();\n  }\n\n  var force = true;\n\n  if (typeof root._bokeh_onload_callbacks === \"undefined\" || force === true) {\n    root._bokeh_onload_callbacks = [];\n    root._bokeh_is_loading = undefined;\n  }\n\n  \n\n  \n  if (typeof (root._bokeh_timeout) === \"undefined\" || force === true) {\n    root._bokeh_timeout = Date.now() + 5000;\n    root._bokeh_failed_load = false;\n  }\n\n  var NB_LOAD_WARNING = {'data': {'text/html':\n     \"<div style='background-color: #fdd'>\\n\"+\n     \"<p>\\n\"+\n     \"BokehJS does not appear to have successfully loaded. If loading BokehJS from CDN, this \\n\"+\n     \"may be due to a slow or bad network connection. Possible fixes:\\n\"+\n     \"</p>\\n\"+\n     \"<ul>\\n\"+\n     \"<li>re-rerun `output_notebook()` to attempt to load from CDN again, or</li>\\n\"+\n     \"<li>use INLINE resources instead, as so:</li>\\n\"+\n     \"</ul>\\n\"+\n     \"<code>\\n\"+\n     \"from bokeh.resources import INLINE\\n\"+\n     \"output_notebook(resources=INLINE)\\n\"+\n     \"</code>\\n\"+\n     \"</div>\"}};\n\n  function display_loaded() {\n    var el = document.getElementById(null);\n    if (el != null) {\n      el.textContent = \"BokehJS is loading...\";\n    }\n    if (root.Bokeh !== undefined) {\n      if (el != null) {\n        el.textContent = \"BokehJS \" + root.Bokeh.version + \" successfully loaded.\";\n      }\n    } else if (Date.now() < root._bokeh_timeout) {\n      setTimeout(display_loaded, 100)\n    }\n  }\n\n\n  function run_callbacks() {\n    try {\n      root._bokeh_onload_callbacks.forEach(function(callback) {\n        if (callback != null)\n          callback();\n      });\n    } finally {\n      delete root._bokeh_onload_callbacks\n    }\n    console.debug(\"Bokeh: all callbacks have finished\");\n  }\n\n  function load_libs(css_urls, js_urls, callback) {\n    if (css_urls == null) css_urls = [];\n    if (js_urls == null) js_urls = [];\n\n    root._bokeh_onload_callbacks.push(callback);\n    if (root._bokeh_is_loading > 0) {\n      console.debug(\"Bokeh: BokehJS is being loaded, scheduling callback at\", now());\n      return null;\n    }\n    if (js_urls == null || js_urls.length === 0) {\n      run_callbacks();\n      return null;\n    }\n    console.debug(\"Bokeh: BokehJS not loaded, scheduling load and callback at\", now());\n    root._bokeh_is_loading = css_urls.length + js_urls.length;\n\n    function on_load() {\n      root._bokeh_is_loading--;\n      if (root._bokeh_is_loading === 0) {\n        console.debug(\"Bokeh: all BokehJS libraries/stylesheets loaded\");\n        run_callbacks()\n      }\n    }\n\n    function on_error(url) {\n      console.error(\"failed to load \" + url);\n    }\n\n    for (let i = 0; i < css_urls.length; i++) {\n      const url = css_urls[i];\n      const element = document.createElement(\"link\");\n      element.onload = on_load;\n      element.onerror = on_error.bind(null, url);\n      element.rel = \"stylesheet\";\n      element.type = \"text/css\";\n      element.href = url;\n      console.debug(\"Bokeh: injecting link tag for BokehJS stylesheet: \", url);\n      document.body.appendChild(element);\n    }\n\n    const hashes = {\"https://cdn.bokeh.org/bokeh/release/bokeh-2.3.3.min.js\": \"dM3QQsP+wXdHg42wTqW85BjZQdLNNIXqlPw/BgKoExPmTG7ZLML4EGqLMfqHT6ON\", \"https://cdn.bokeh.org/bokeh/release/bokeh-tables-2.3.3.min.js\": \"8x57I4YuIfu8XyZfFo0XVr2WAT8EK4rh/uDe3wF7YuW2FNUSNEpJbsPaB1nJ2fz2\", \"https://cdn.bokeh.org/bokeh/release/bokeh-widgets-2.3.3.min.js\": \"3QTqdz9LyAm2i0sG5XTePsHec3UHWwVsrOL68SYRoAXsafvfAyqtQ+h440+qIBhS\"};\n\n    for (let i = 0; i < js_urls.length; i++) {\n      const url = js_urls[i];\n      const element = document.createElement('script');\n      element.onload = on_load;\n      element.onerror = on_error.bind(null, url);\n      element.async = false;\n      element.src = url;\n      if (url in hashes) {\n        element.crossOrigin = \"anonymous\";\n        element.integrity = \"sha384-\" + hashes[url];\n      }\n      console.debug(\"Bokeh: injecting script tag for BokehJS library: \", url);\n      document.head.appendChild(element);\n    }\n  };\n\n  function inject_raw_css(css) {\n    const element = document.createElement(\"style\");\n    element.appendChild(document.createTextNode(css));\n    document.body.appendChild(element);\n  }\n\n  \n  var js_urls = [\"https://cdn.bokeh.org/bokeh/release/bokeh-2.3.3.min.js\", \"https://cdn.bokeh.org/bokeh/release/bokeh-widgets-2.3.3.min.js\", \"https://cdn.bokeh.org/bokeh/release/bokeh-tables-2.3.3.min.js\"];\n  var css_urls = [];\n  \n\n  var inline_js = [\n    function(Bokeh) {\n      Bokeh.set_log_level(\"info\");\n    },\n    function(Bokeh) {\n    \n    \n    }\n  ];\n\n  function run_inline_js() {\n    \n    if (root.Bokeh !== undefined || force === true) {\n      \n    for (var i = 0; i < inline_js.length; i++) {\n      inline_js[i].call(root, root.Bokeh);\n    }\n    } else if (Date.now() < root._bokeh_timeout) {\n      setTimeout(run_inline_js, 100);\n    } else if (!root._bokeh_failed_load) {\n      console.log(\"Bokeh: BokehJS failed to load within specified timeout.\");\n      root._bokeh_failed_load = true;\n    } else if (force !== true) {\n      var cell = $(document.getElementById(null)).parents('.cell').data().cell;\n      cell.output_area.append_execute_result(NB_LOAD_WARNING)\n    }\n\n  }\n\n  if (root._bokeh_is_loading === 0) {\n    console.debug(\"Bokeh: BokehJS loaded, going straight to plotting\");\n    run_inline_js();\n  } else {\n    load_libs(css_urls, js_urls, function() {\n      console.debug(\"Bokeh: BokehJS plotting callback run at\", now());\n      run_inline_js();\n    });\n  }\n}(window));"
+          },
+          "metadata": {}
+        },
+        {
+          "output_type": "display_data",
+          "data": {
+            "text/html": [
+              "\n",
+              "\n",
+              "\n",
+              "\n",
+              "\n",
+              "\n",
+              "  <div class=\"bk-root\" id=\"48e77d22-8db0-4449-83dc-d10e7fd4017b\" data-root-id=\"1892\"></div>\n"
+            ]
+          },
+          "metadata": {}
+        },
+        {
+          "output_type": "display_data",
+          "data": {
+            "application/javascript": [
+              "(function(root) {\n",
+              "  function embed_document(root) {\n",
+              "    \n",
+              "  var docs_json = {\"3f8c97d9-e724-4df6-883e-b3e38a0f79f9\":{\"defs\":[],\"roots\":{\"references\":[{\"attributes\":{\"below\":[{\"id\":\"1901\"}],\"center\":[{\"id\":\"1904\"},{\"id\":\"1908\"}],\"left\":[{\"id\":\"1905\"}],\"renderers\":[{\"id\":\"1920\"}],\"title\":{\"id\":\"1893\"},\"toolbar\":{\"id\":\"1914\"},\"x_range\":{\"id\":\"1890\"},\"x_scale\":{\"id\":\"1897\"},\"y_range\":{\"id\":\"1891\"},\"y_scale\":{\"id\":\"1899\"}},\"id\":\"1892\",\"subtype\":\"Figure\",\"type\":\"Plot\"},{\"attributes\":{\"graph_layout\":{\"1001\":[5.888051261836447,-6.670323050339485],\"10035\":[2.0777003849277254,3.5508622102553944],\"10092\":[8.794271062391791,-1.7180863216704017],\"10126\":[-5.318823371129607,5.4021668302568155],\"10182\":[-0.08880656161371137,-8.30548929381724],\"10186\":[1.8429917253079224,7.103952259139517],\"10282\":[4.838660439961385,-6.155039063683431],\"10362\":[-7.405364149118083,-4.274119776942904],\"10402\":[-1.2630220373350327,8.967030346236426],\"10413\":[0.33068265237391886,-4.875467696936391],\"10473\":[4.824694590949277,-0.8017381290981804],\"10751\":[-2.9072733254854968,-8.547965600516047],\"10854\":[9.115450112042517,-3.1454884835287964],\"10887\":[-7.4668734082047665,-1.435362256985992],\"11207\":[-0.32225497885895654,-9.692651972881249],\"11379\":[0.3923278237274312,8.140375859464383],\"11410\":[2.0318758319377475,8.694459191924766],\"11429\":[-5.9663753615689,7.9494664103916675],\"11540\":[-4.030791176686788,6.538765375383483],\"11598\":[5.0712828921631985,1.4501869028079737],\"11621\":[-0.5058180535371752,9.809159535605476],\"11622\":[0.49974142012729933,-9.388222742523281],\"11631\":[-4.407795262068962,-8.23178460982919],\"11692\":[0.8574566932598258,8.646303858007679],\"1172\":[6.007735548537282,-5.314503206138403],\"11788\":[-6.54651444369026,6.759700581567451],\"1182\":[-3.8335112555018114,-7.154029178258937],\"11882\":[3.9430581032618597,-7.947558969950943],\"1190\":[2.3626184126252734,-7.787260775515889],\"1191\":[9.170689280213136,0.5734981678367982],\"1198\":[-5.627257142101334,-7.91959182604448],\"12226\":[-1.3361897113419747,-8.20714236647802],\"12306\":[-4.775436025047323,7.164026877521792],\"12373\":[-1.566123252344648,3.937150301659221],\"12409\":[-6.385376974441759,-6.9683844431774205],\"12417\":[-9.33780330251318,1.4130078458510404],\"12468\":[6.892128731944977,-6.680651958911817],\"12526\":[-1.8454106493830313,-9.31404593891951],\"12623\":[-9.107437501867025,-1.7585495206903115],\"12641\":[-5.5414009073927,6.6347241199869655],\"1267\":[-9.129998418715125,-3.364128090743856],\"1270\":[-2.4387447839615217,6.788165523730523],\"12780\":[9.930078850223087,0.8376772369099199],\"12880\":[7.600772153094676,5.642121627901809],\"12930\":[-0.49251617312520646,1.1643581883993412],\"13243\":[5.535004613325125,7.510331011954256],\"13371\":[-6.787947762566194,4.83186508777062],\"1347\":[3.7821672626162175,7.674796785833654],\"140\":[4.378366784254646,-7.968896480909717],\"1481\":[-2.1169683794499594,-8.024626147529279],\"151\":[-4.931875458749999,-7.814419634932911],\"153\":[0.9196029260271924,-7.563512951605394],\"1548\":[0.5998444967898914,1.7442261565798547],\"1552\":[5.439846957911586,-7.663809138143894],\"1570\":[6.50664763554429,-4.54795586625671],\"1593\":[6.360651675558964,7.487378063652301],\"16090\":[7.006221852369689,6.219904492451187],\"1624\":[-8.525083218153554,-2.738030940500458],\"1743\":[-6.318856747554355,-5.840198568223061],\"17521\":[-5.110200478726716,-8.130214381242554],\"1767\":[7.241534822068199,-4.102198936645854],\"1868\":[1.5875399153758067,8.369410616429258],\"1874\":[8.200421082154584,-4.775164963050042],\"1879\":[8.530628345391857,3.89642886802482],\"1893\":[7.800131829320899,4.7690648796228885],\"190\":[2.674859935867228,-9.565499122318995],\"1901\":[6.00794139369594,6.968175956413593],\"1977\":[-7.35174808425166,3.2312923975300403],\"1993\":[-9.033129015066164,-0.5545364295244196],\"1997\":[4.271807441121423,-7.012381249004055],\"2063\":[8.08118743085751,-0.36031592301820625],\"2137\":[-8.229007031171957,0.7947485404161934],\"2300\":[-6.782313880263262,5.974813146242194],\"2328\":[7.2379016937543375,-6.412655321030511],\"23469\":[-1.3635995895066368,8.777907780214496],\"2364\":[-9.490927993577536,-2.3777323854107957],\"2377\":[5.173566501898521,7.869557735471041],\"240\":[-7.687420951905684,-5.186382982319728],\"2425\":[1.3708519135331445,-9.145294660825607],\"24415\":[0.9500759530854322,-7.804105897750852],\"24431\":[4.544406477554003,-8.315070929480587],\"2444\":[4.181813782284767,8.010200725600619],\"255\":[0.929058185049106,1.6175159573403832],\"2569\":[8.491292847125857,-3.3846661072011064],\"2581\":[9.00272384206674,-0.5620497671941179],\"2778\":[8.296063733950485,1.931804978036588],\"2812\":[2.528494432922275,1.3744873318624538],\"28954\":[-8.470800162097694,-0.999634187740099],\"2953\":[-9.221099874147468,0.1302573920948878],\"29586\":[-7.500674368713581,-5.693236837121405],\"2963\":[8.55694884188693,-2.3811292034761067],\"2986\":[1.3853014589780153,-2.469727726188332],\"3046\":[-6.951100547870038,3.863863929771546],\"30972\":[-2.402401250595795,-0.02949728996157331],\"315\":[2.8534101458336223,-8.663073763202918],\"324\":[-2.1862615581350493,-0.19907246255560104],\"3279\":[-4.896633537764292,-4.695088128550046],\"32911\":[-7.4817813484400295,-5.077058333246783],\"3307\":[-3.0793139187231438,8.38647172189766],\"3325\":[7.97117422335976,6.382780137814211],\"33311\":[-1.9484484980430254,-0.46795361662485346],\"3351\":[-7.923082728344157,0.0530063241800684],\"340\":[0.7286831656217564,-8.490042697399618],\"3449\":[-7.580479457287459,2.2847230565836316],\"34722\":[2.4375289023506377,-9.606567061377309],\"3550\":[2.3367948036948607,8.777854475883949],\"3563\":[-5.372151949387615,-5.963356236615205],\"35992\":[-9.995798892208466,1.4166680604021156],\"366\":[-0.8153413970164312,-8.377655943620839],\"370\":[-1.7123287182158475,-0.8238602298274443],\"3705\":[9.528238424041035,-1.0018615800585047],\"371\":[-2.212843388106099,-0.4676501685164053],\"37164\":[0.7003063880770704,-8.247645594127519],\"3748\":[-1.162324018132137,8.877417380259866],\"378\":[-9.003249848524996,-0.6760502541145236],\"3794\":[-6.759134885489198,-2.9213798217323883],\"3795\":[-3.0131140502704956,8.739698677886556],\"3830\":[9.31295038572266,2.932151308250264],\"38513\":[-1.5464826009943942,-1.1881134143382854],\"38562\":[-0.6605275203600521,-8.406031392467177],\"39012\":[2.9507352500990276,-8.856549867558615],\"392\":[-1.9253397504073269,-0.21379962412483022],\"399\":[-1.7070723306330413,-1.37447893162077],\"400\":[-2.118332151344605,-0.6540848836884906],\"402\":[-1.7378302537480554,-0.3573054121303067],\"40694\":[6.11399874341262,-6.967334959677257],\"40716\":[-8.453489175713377,2.7132107177705342],\"41045\":[8.749378973050323,3.9829317666986213],\"41157\":[6.694415378877843,-4.689062001797155],\"41901\":[-9.3631810578474,-0.7068710115638325],\"42143\":[-9.91006894691751,0.6330074096046807],\"4219\":[-2.461813637036847,8.262935820988654],\"42367\":[1.4285512221917753,8.359710748677625],\"4292\":[6.59728110653837,6.1715614740421945],\"42929\":[9.268846964057118,0.4363000582157998],\"431\":[8.015704308270417,-6.021510852742234],\"43276\":[8.567909225872743,2.5923067428041717],\"44292\":[4.278260625969727,7.867036028296828],\"44657\":[-8.611778776291477,-2.6008102407542992],\"45123\":[7.63826091722503,4.062959860539709],\"45224\":[-2.5154221431608845,6.963782189343991],\"4529\":[6.956286500001177,4.742710419544607],\"456\":[7.126251815929042,-5.26047646009809],\"46229\":[7.9925844184351424,-4.344050708729802],\"46632\":[6.196664631921011,-5.485531783744696],\"4675\":[7.763228764074534,-2.7329146883845477],\"46906\":[5.319657419994855,-7.786348173239035],\"473\":[-1.5038140772814488,-1.4518966541389313],\"47865\":[-9.324757193165764,0.24806957096967527],\"4805\":[-7.774103725209868,3.9418230739149616],\"48323\":[3.369985567401563,8.609903162791689],\"4854\":[5.413817979298657,-5.014775665419657],\"490\":[-1.3185835382039572,-1.3020473284694165],\"49461\":[2.4130094132030453,9.170864140887987],\"49574\":[9.99212244210682,2.1331930182414327],\"49656\":[-9.414944206030556,-2.523623616432246],\"49688\":[-9.67509305463411,3.2541779015600065],\"49727\":[-7.450606525785754,3.104628138345782],\"49737\":[-4.456160716390855,9.153132473616841],\"49745\":[6.063973611027815,-6.631509702500796],\"49807\":[4.1241775241882195,9.326361073493663],\"5013\":[6.150916316903691,5.151959281972181],\"50224\":[1.7859513090309984,6.923163668850181],\"50265\":[8.221426297046603,1.1694882873997665],\"50333\":[0.45299296438908193,9.535289310765386],\"50348\":[7.790895030658852,-1.8206765991126155],\"50501\":[8.20201237949323,-0.2520947891133013],\"50586\":[7.722829044852638,3.371231472917154],\"50711\":[4.351781976105348,8.361812135582316],\"5087\":[-7.4608662582421825,4.623325087654638],\"50922\":[4.720947926311064,-6.0165457424557935],\"50926\":[2.777268728390441,-1.0185205057197595],\"50939\":[-3.963737589389812,-7.4162810035406865],\"51122\":[2.953305839957444,7.715311431659074],\"51331\":[-3.911581062344444,6.3377346868359865],\"51532\":[-7.9438154596419865,-3.517218699567772],\"51651\":[4.991640508304469,-7.277193313752753],\"51760\":[-8.114619651147962,0.050964896658238334],\"51771\":[1.3891059632002776,-9.34092877778762],\"51902\":[-7.684861429273642,-2.9072453561824503],\"52127\":[-7.161910234196045,3.967325810159241],\"52231\":[0.3721861785123058,8.326433498604635],\"52252\":[-2.267285518967314,-7.96328772968497],\"52333\":[5.778227429987752,6.723639736909055],\"5234\":[5.051538598164129,6.675727558469797],\"52409\":[1.8462677334776534,-6.715163151380675],\"52436\":[-6.223259149961021,-5.97366457753321],\"52446\":[5.522135930643001,-5.159506823083628],\"52489\":[9.493000144004812,3.002630626976267],\"52582\":[-8.269726035486428,2.2069356457347142],\"5277\":[8.586593141100474,0.4358605298149891],\"5288\":[5.630428917803141,-8.075916090221407],\"52884\":[-1.4294478062603375,-8.080291128832888],\"52922\":[7.016537496395234,4.590752229361866],\"5294\":[9.766067345880606,2.0867544260762005],\"53010\":[-6.882565647495374,7.0242106224741825],\"53013\":[-2.40362246910615,8.819201220826255],\"53076\":[6.5039643782637775,7.403906241051163],\"53171\":[-6.091633184541143,8.10973257329928],\"53220\":[9.006821593405544,-0.39921813417234586],\"53312\":[2.420966918021417,-1.108781408800321],\"5351\":[9.233654767868535,-4.297592201855833],\"53551\":[-6.4970391641635015,5.740769717066673],\"53821\":[0.7364476025568786,1.60335853017758],\"53829\":[7.831677431392239,4.927470727465229],\"53906\":[-4.201650926748795,-6.148758569402561],\"54279\":[-8.05016527302955,4.099471848517715],\"54378\":[3.7142326060180375,7.446053424683203],\"54411\":[-2.398668849185184,8.086944258266998],\"54452\":[-1.9344896359986838,-6.580286359286452],\"54465\":[-0.4769007208386523,9.408783607308537],\"54535\":[-6.399624564782856,-4.385116346690919],\"54647\":[-7.62582567095442,-4.392953414632885],\"54693\":[3.2592766647992835,-8.18639581961263],\"54753\":[-7.645756168726766,-1.5316184479151986],\"54775\":[7.6743040392476845,1.1513229156180111],\"54894\":[9.505367987310796,-3.25430773505652],\"54954\":[8.695202364445407,4.858900086596678],\"54995\":[0.23504043285982432,-5.011506784238839],\"55015\":[2.13447179677345,3.373875083162695],\"55105\":[2.075783002320136,8.512574616998894],\"55205\":[-4.966844318431679,7.438306995377992],\"55299\":[-5.397712950190026,5.55043266075548],\"553\":[3.4888162452806983,8.946411535350386],\"55411\":[8.535526448800335,-0.9671076137943686],\"55526\":[-8.578511462451884,4.900426638837076],\"55629\":[-3.3130087229750558,-8.468439997070528],\"55632\":[8.92227781400292,-4.156309533619372],\"55639\":[-2.3484764835858,6.565496056775457],\"55659\":[-0.0973611751705937,-8.594646264148086],\"55662\":[-8.754430968214013,-1.715579364265948],\"55892\":[5.6714070579632825,5.900176973634395],\"55914\":[-4.272666215491447,7.522988960145812],\"56015\":[-5.979123760136295,-7.340583059943646],\"56067\":[-8.407531984835483,-4.77249213346823],\"56116\":[7.49089095943724,-3.4730453116354743],\"56178\":[2.21512092396238,-7.856256433222832],\"56244\":[-1.4775781217884338,8.728355326898278],\"56294\":[-1.1386202955443365,-9.469549177995244],\"5634\":[-6.297316589915607,5.230996145488194],\"56393\":[4.55826988759426,3.050809776240016],\"56403\":[8.30226913453409,-2.315540991289132],\"56467\":[-7.478052772250213,2.1496274731340597],\"56549\":[-7.477258070013391,-6.824356302004302],\"5656\":[-8.048448403472067,2.1329552108633614],\"56575\":[7.8527287575784515,-6.01933099594339],\"56670\":[-5.061832317666845,-4.7120040569092865],\"56732\":[4.135492549708752,-6.773191115447767],\"56744\":[8.294753690030776,0.4158533802351005],\"56751\":[-6.482455304923361,5.357194819443932],\"568\":[-4.811370048831899,-6.875489505917935],\"56837\":[-2.822898437406734,-8.21251180191674],\"56963\":[-0.7123089100234085,7.675116177058366],\"5703\":[-7.51499599035218,-2.8832645847915006],\"5713\":[8.01402546704948,2.6671215338032175],\"57294\":[2.3616381555839756,1.3769819581221123],\"5734\":[7.544355944879912,1.2557853660361895],\"57368\":[6.294977027962467,5.076313140825125],\"57599\":[-1.631468478683733,3.7829095344666563],\"57743\":[-5.5330495168045575,-6.178846448208908],\"57752\":[-5.083945704564929,6.804550205762954],\"57969\":[5.660471551557777,-6.405692722370563],\"57978\":[6.466659242998052,6.269178080725008],\"58007\":[-3.8815951179809014,8.234683957034314],\"58037\":[8.383681950990741,-1.2822127619971924],\"58055\":[2.605875028891493,-9.603984994053263],\"58074\":[-7.738813467917143,5.505957681361669],\"58087\":[-5.842458432426957,-8.243835238876494],\"58132\":[1.4706693498862444,-2.307088290803082],\"5816\":[-8.430984361698124,1.0609834176478414],\"58190\":[8.02834479564405,1.8825279778104371],\"58374\":[8.160489710711918,-3.261904607011797],\"58477\":[-2.344199377490445,-9.09978784987687],\"58550\":[5.8152655502616994,-8.35170338308328],\"58585\":[2.8161266993033705,8.76618349864595],\"58594\":[0.03311764612871162,8.985138042627073],\"58676\":[-6.712171574859137,7.019106184237313],\"58803\":[0.8813165006463609,8.908368435375955],\"5903\":[2.832792211432254,-9.658565998163231],\"59090\":[-9.150850959189226,1.3339951867105129],\"59296\":[-5.727470699630792,6.866139979805202],\"59444\":[-6.209126538869002,-6.796365590037121],\"59446\":[-6.751923986464805,-5.851075122379092],\"59525\":[-9.292974797723867,-1.7131771959359687],\"5955\":[5.818687368035349,6.040238412041332],\"59754\":[8.041259996576896,-2.8171873083008294],\"59886\":[9.135324802623265,-1.7887546397542733],\"60027\":[7.439937045222556,-6.614056367675468],\"60056\":[-1.3798262460546087,9.017001307087245],\"60066\":[-1.0113399434295491,9.003930973811899],\"60242\":[1.3901292903214295,-2.6739787231354253],\"60274\":[4.974900097191266,7.54977113457825],\"60359\":[3.8105425853598156,-7.647476994152615],\"60452\":[-0.5998147779648944,1.2862135515162336],\"6077\":[-7.516870109337701,-6.663454557659852],\"60855\":[-6.639959752531156,4.715442156045925],\"60920\":[-4.98099058939651,-7.121287221493437],\"6099\":[-8.636438065471513,-5.0065333021626985],\"61119\":[8.031138355104714,6.541161034699914],\"61193\":[3.2192699335592208,-7.348629448151344],\"61225\":[-3.687453570566736,7.646915970808277],\"61329\":[0.4773711483963097,-9.016802883812014],\"61517\":[-9.022567979323066,-0.7932871068453556],\"61588\":[-8.57825372320658,1.8479263230956846],\"61609\":[4.337957964340922,7.811484789289755],\"61615\":[4.909038918532067,3.0149849127512507],\"61731\":[-3.1825777321430935,8.708648401928944],\"61753\":[-9.40378568742789,-3.458221425023283],\"61764\":[1.7583586416115586,-8.35919256708232],\"61841\":[-0.1675015115143481,-9.641030911644819],\"61896\":[5.199935161528459,6.881911255460622],\"61923\":[-1.923754020959562,-9.692630584871967],\"61929\":[-8.260550086616513,3.502765958747301],\"61951\":[-8.86132492595841,-4.0689929283755895],\"61959\":[-5.852045142702136,6.153424961480162],\"62138\":[6.648390799698058,-6.397661426464658],\"62199\":[-3.8942007087509927,-8.811622118550623],\"62233\":[7.288831273179637,-5.376285838883113],\"62285\":[-7.205557661591691,4.463606440455492],\"62313\":[-2.9920005367281606,-7.37409645986435],\"62334\":[8.083756386226014,2.81269859518285],\"62404\":[-4.580284056334984,-8.566533984315576],\"62416\":[8.107835905286837,-4.909553943646532],\"62419\":[5.26597484111797,1.4852820583043789],\"62433\":[10.0,0.6841053018189193],\"62436\":[9.877658469783793,-1.0391239717317595],\"62457\":[-8.257108354776676,0.9691462200988633],\"62744\":[7.1176629558569235,-4.20214298544928],\"62768\":[-6.5675079641876035,-2.8203439049240773],\"62771\":[7.389714743748928,5.499599810818199],\"62814\":[1.4600010615694556,9.20460592410004],\"62833\":[5.690398989437229,7.7314769050284715],\"62926\":[4.607319338032026,-0.8296042199129048],\"6322\":[-8.122293802846173,-3.5708351243345535],\"6335\":[-6.773270039105092,-6.024231802486667],\"638\":[-9.727340844693057,0.6256987577610045],\"6512\":[-7.439090122199549,5.282135433376495],\"6723\":[8.425915721076377,-1.1098044834020229],\"686\":[7.818843223417142,4.140887894522369],\"6897\":[-4.948945361843836,6.62487055137069],\"69\":[7.043971230261419,6.39017507941528],\"7203\":[-4.3070739054735565,-6.313720600120695],\"7209\":[-8.735199140619235,-4.862090729510211],\"7240\":[-2.2476435578320286,-8.752330666903838],\"75\":[-7.821942844565019,-5.924358056336861],\"7573\":[8.452743674580768,1.2100429832578665],\"76\":[-1.2777549867924347,8.603955745711835],\"7614\":[-1.9072389716975324,-6.399582208289879],\"7695\":[-3.797342752858558,8.373325312831172],\"77\":[-9.661088538107549,1.3489232789256447],\"771\":[1.5162284608550025,9.358587073876812],\"774\":[8.177535310381591,-4.363708801744027],\"7809\":[2.1842196634665205,3.193041380406701],\"7824\":[3.3528110343318667,-8.058977513795494],\"7889\":[0.0336800788190171,9.17044267747811],\"790\":[4.505222381048483,7.876551459765455],\"7964\":[-8.417686643770487,3.4841651699013516],\"8030\":[4.538377821184685,-1.0043733389486948],\"823\":[8.720078386744907,2.526401266991882],\"8286\":[7.667819435872359,-3.5653119141703855],\"83\":[-8.200320150263417,-0.957913072824229],\"8334\":[-4.549935582681683,9.349487896059806],\"8435\":[-8.514086751993954,-3.918548587302677],\"8512\":[-0.7246839100828067,7.918663426902683],\"8560\":[-6.24484494625653,-4.440495512717929],\"8731\":[0.6060600260183553,9.477592048931646],\"878\":[3.960488912423284,8.962865991884904],\"879\":[-3.4163157523440577,-8.827894861224799],\"8817\":[-2.891995850327399,-7.1412835661007685],\"8842\":[-9.359541578353062,3.138252914738891],\"885\":[-8.488490736215352,2.867600560557115],\"89\":[-7.362536990523124,-5.789599921928322],\"8905\":[-2.2476132628235668,8.848364528375653],\"8941\":[7.9619842100859195,3.4642791059306353],\"8942\":[4.693776008229475,2.923935471828219],\"8944\":[2.876290901460304,7.858496888773904],\"8947\":[-8.912587354924495,5.0979608749089715],\"9065\":[1.8128238057811534,-8.620773365679451],\"9099\":[1.8317648324164566,-6.881615661717612],\"9116\":[-1.1600689560632285,-9.660520706443002],\"9162\":[-0.6968272647856716,7.438416404139204],\"9242\":[3.135251802398638,-7.135530875473434],\"9294\":[8.03201918967895,-1.8674870118915512],\"9386\":[2.9088554200292163,9.082267408697296],\"9400\":[8.727200066669313,5.022692800798995],\"9458\":[4.996308800161283,-7.1101463011395785],\"9528\":[2.569333248836183,-1.000451547057706],\"9607\":[-5.909508807308662,6.00428053091005],\"9678\":[-8.905098294027084,1.9472670046363834],\"971\":[-7.811469333676127,-1.635025566241399],\"9712\":[-4.428722344389595,7.531660613278285],\"9777\":[-3.959494946791458,-8.662900213250714],\"9911\":[-6.215651530369759,-7.622743573117388],\"9987\":[-3.8309216956984,7.907534870327103]}},\"id\":\"1929\",\"type\":\"StaticLayoutProvider\"},{\"attributes\":{\"data_source\":{\"id\":\"1922\"},\"glyph\":{\"id\":\"1931\"},\"hover_glyph\":null,\"muted_glyph\":null,\"view\":{\"id\":\"1924\"}},\"id\":\"1923\",\"type\":\"GlyphRenderer\"},{\"attributes\":{\"active_multi\":null,\"active_scroll\":{\"id\":\"1910\"},\"tools\":[{\"id\":\"1909\"},{\"id\":\"1910\"},{\"id\":\"1911\"},{\"id\":\"1912\"},{\"id\":\"1913\"}]},\"id\":\"1914\",\"type\":\"Toolbar\"},{\"attributes\":{},\"id\":\"1911\",\"type\":\"SaveTool\"},{\"attributes\":{\"source\":{\"id\":\"1922\"}},\"id\":\"1924\",\"type\":\"CDSView\"},{\"attributes\":{\"end\":10.1,\"start\":-10.1},\"id\":\"1890\",\"type\":\"Range1d\"},{\"attributes\":{},\"id\":\"1897\",\"type\":\"LinearScale\"},{\"attributes\":{},\"id\":\"1912\",\"type\":\"ResetTool\"},{\"attributes\":{\"data\":{\"activity\":[4.05,6.45,6.05,4.0,6.15,4.0,4.0,4.05,4.35,8.26,8.22,8.22,8.22,3.95,8.1,4.45,6.05,8.05,6.4,6.2,4.55,4.05,6.05,6.15,6.2,6.05,4.1,4.0,7.77,6.2,5.0,3.95,7.7,7.7,6.15,4.35,3.95,6.15,3.95,6.2,6.0,7.6,6.2,6.2,4.45,4.05,6.15,6.0,7.4,6.2,5.06,6.25,7.35,4.0,4.4,6.25,5.24,3.95,4.65,4.05,4.2,3.95,7.15,6.25,6.2,7.1,3.95,6.25,4.1,4.0,6.0,4.0,7.1,4.0,6.0,4.0,4.0,7.05,4.0,6.2,6.2,7.04,7.02,6.25,7.0,6.96,6.25,6.96,6.96,4.0,6.96,3.95,4.0,4.2,6.9,6.2,4.1,6.85,3.95,6.82,3.95,3.95,6.8,6.0,4.0,4.2,3.95,6.15,3.95,6.25,6.25,4.2,6.2,4.95,6.7,4.1,6.7,4.1,4.05,4.2,6.2,6.2,4.05,4.2,6.0,4.2,4.0,6.15,4.0,4.0,6.2,4.0,4.0,6.65,6.0,6.15,6.2,4.2,4.05,4.0,4.0,4.0,6.6,4.0,3.95,4.1,6.2,4.0,6.2,4.0,6.25,4.0,4.0,6.2,6.2,6.2,6.2,6.2,6.2,3.95,4.25,6.25,6.55,4.0,6.55,4.0,6.55,3.95,4.0,6.55,3.95,4.0,4.0,3.95,6.2,6.5,6.5,4.0,4.0,6.5,3.95,6.25,6.2,5.19,6.25,6.2,6.2,4.05,6.25,5.4,4.4,4.0,5.95,3.95,6.15,3.95,6.2,6.5,3.95,3.95,6.2,3.95,3.95,6.25,4.0,6.5,3.95,4.0,4.05,4.05,6.2,4.05,6.2,3.95,6.2,4.15,5.95,6.2,4.0,6.15,4.0,4.15,4.05,4.05,4.0,5.66,6.2,6.15,4.05,6.15,4.0,6.5,4.35,4.7,6.2,6.5,4.4,4.15,6.15,6.5,6.5,6.2,6.15,4.15,6.5,6.2,4.05,4.0,6.15,4.05,4.05,4.25,6.25,4.05,4.0,4.05,4.0,4.0,6.2,6.25,6.15,6.5,6.5,6.25,4.0,4.35,4.05,4.05,6.1,6.25,3.95,3.9,3.9,4.0,6.15,6.5,4.15,6.1,3.9,4.0,6.1,4.05,6.1,6.1,3.9,4.05,6.25,4.4,6.15,6.2,4.15,4.0,4.05,4.0,6.1,4.0,4.0,3.95,6.2,6.5,3.9,6.15,6.25,4.05,6.25,6.15,4.05,3.95,6.2,4.0,6.5,6.1,6.2,6.5,4.1,6.2,6.5,4.3,6.15,6.5,6.2,6.2,6.5,6.2,6.1,4.05,4.57,4.35,6.25,6.2,4.0,6.2,4.05,4.55,6.25,4.05,6.15,6.2,4.05,3.95,6.45,6.2,6.2,6.2,4.05,4.0,5.8,6.45,4.05,4.1,4.1,4.5,6.2,4.1,6.15,3.95,4.5,6.2,4.05,4.05,6.2,3.95,6.15,4.3,4.05,6.2,6.45,6.45,4.05,6.45,6.2,5.39,6.45,6.15,6.45,5.37,6.15,3.95,4.0,4.81,4.05,4.4,4.1,4.05,6.45,6.2,6.05,6.15,6.45,6.15,6.45,4.0,6.2,4.05],\"index\":[55299,2063,12306,57368,10282,59444,59446,53312,45123,69,75,76,77,61517,83,41045,12373,89,2137,8286,39012,55411,12409,10362,4219,12417,51331,59525,140,8334,32911,61588,151,153,10402,45224,61609,10413,61615,6322,12468,190,6335,4292,41157,55526,10473,12526,240,8435,30972,2300,255,57599,43276,2328,28954,61731,37164,53551,49461,61753,315,2364,8512,324,61764,2377,51532,55629,12623,55632,340,55639,12641,59754,55659,366,55662,6512,8560,370,371,2425,378,392,2444,399,400,57743,402,61841,57752,49574,431,4529,51651,456,61896,473,61923,61929,490,12780,59886,49656,61951,10751,61959,2569,2581,49688,8731,33311,553,51760,568,51771,53821,49727,4675,6723,53829,49737,12880,49745,55892,10854,55914,57969,8817,57978,60027,638,12930,10887,8842,49807,53906,58007,60056,60066,686,58037,62138,51902,4805,58055,8905,56015,2778,58074,58087,8941,8942,8944,6897,8947,4854,62199,47865,2812,771,56067,774,58132,790,62233,56116,823,62285,58190,60242,62313,9065,878,879,56178,60274,885,62334,2953,9099,29586,2963,5013,9116,52127,2986,23469,41901,56244,13243,62404,11207,60359,9162,971,62416,62419,5087,62433,62436,3046,56294,1001,62457,58374,54279,52231,9242,52252,7203,60452,7209,50224,13371,7240,56393,9294,56403,50265,54378,52333,58477,17521,5234,11379,54411,11410,56467,1172,46229,35992,5277,1182,42143,50333,11429,1190,1191,5288,9386,50348,1198,5294,54452,58550,9400,52409,54465,48323,3279,52436,58585,52446,58594,56549,5351,3307,9458,1267,1270,3325,56575,44292,54535,52489,11540,3351,62744,62768,62771,58676,9528,1347,50501,11598,62814,56670,11621,52582,11622,11631,62833,54647,3449,42367,9607,7573,50586,56732,54693,56744,11692,56751,58803,60855,7614,1481,62926,9678,3550,54753,3563,9712,54775,60920,5634,56837,1548,11788,7695,1552,50711,5656,1570,46632,9777,1593,5703,5713,1624,5734,11882,54894,38513,44657,3705,7809,56963,7824,52884,38562,3748,54954,9911,5816,52922,61119,1743,7889,3794,3795,54995,59090,16090,1767,55015,50922,50926,40694,3830,50939,9987,61193,40716,5903,53010,53013,7964,61225,10035,46906,55105,5955,1868,1874,53076,1879,8030,24415,1893,10092,1901,24431,10126,61329,59296,34722,55205,42929,51122,53171,1977,6077,12226,10182,1993,10186,1997,57294,6099,53220],\"node_color\":[0.0344036697247706,0.5848623853211011,0.49311926605504597,0.022935779816513735,0.5160550458715597,0.022935779816513735,0.022935779816513735,0.0344036697247706,0.10321100917431181,1.0,0.9908256880733949,0.9908256880733949,0.9908256880733949,0.011467889908256867,0.9633027522935781,0.12614678899082576,0.49311926605504597,0.9518348623853213,0.5733944954128442,0.5275229357798167,0.1490825688073395,0.0344036697247706,0.49311926605504597,0.5160550458715597,0.5275229357798167,0.49311926605504597,0.04587155963302747,0.022935779816513735,0.8876146788990825,0.5275229357798167,0.2522935779816514,0.011467889908256867,0.8715596330275232,0.8715596330275232,0.5160550458715597,0.10321100917431181,0.011467889908256867,0.5160550458715597,0.011467889908256867,0.5275229357798167,0.481651376146789,0.8486238532110092,0.5275229357798167,0.5275229357798167,0.12614678899082576,0.0344036697247706,0.5160550458715597,0.481651376146789,0.802752293577982,0.5275229357798167,0.2660550458715595,0.5389908256880734,0.7912844036697247,0.022935779816513735,0.11467889908256879,0.5389908256880734,0.30733944954128456,0.011467889908256867,0.17201834862385323,0.0344036697247706,0.06880733944954132,0.011467889908256867,0.7454128440366975,0.5389908256880734,0.5275229357798167,0.7339449541284403,0.011467889908256867,0.5389908256880734,0.04587155963302747,0.022935779816513735,0.481651376146789,0.022935779816513735,0.7339449541284403,0.022935779816513735,0.481651376146789,0.022935779816513735,0.022935779816513735,0.7224770642201835,0.022935779816513735,0.5275229357798167,0.5275229357798167,0.7201834862385322,0.7155963302752294,0.5389908256880734,0.7110091743119268,0.7018348623853211,0.5389908256880734,0.7018348623853211,0.7018348623853211,0.022935779816513735,0.7018348623853211,0.011467889908256867,0.022935779816513735,0.06880733944954132,0.688073394495413,0.5275229357798167,0.04587155963302747,0.6766055045871561,0.011467889908256867,0.6697247706422019,0.011467889908256867,0.011467889908256867,0.6651376146788991,0.481651376146789,0.022935779816513735,0.06880733944954132,0.011467889908256867,0.5160550458715597,0.011467889908256867,0.5389908256880734,0.5389908256880734,0.06880733944954132,0.5275229357798167,0.24082568807339444,0.6422018348623854,0.04587155963302747,0.6422018348623854,0.04587155963302747,0.0344036697247706,0.06880733944954132,0.5275229357798167,0.5275229357798167,0.0344036697247706,0.06880733944954132,0.481651376146789,0.06880733944954132,0.022935779816513735,0.5160550458715597,0.022935779816513735,0.022935779816513735,0.5275229357798167,0.022935779816513735,0.022935779816513735,0.6307339449541286,0.481651376146789,0.5160550458715597,0.5275229357798167,0.06880733944954132,0.0344036697247706,0.022935779816513735,0.022935779816513735,0.022935779816513735,0.6192660550458716,0.022935779816513735,0.011467889908256867,0.04587155963302747,0.5275229357798167,0.022935779816513735,0.5275229357798167,0.022935779816513735,0.5389908256880734,0.022935779816513735,0.022935779816513735,0.5275229357798167,0.5275229357798167,0.5275229357798167,0.5275229357798167,0.5275229357798167,0.5275229357798167,0.011467889908256867,0.08027522935779818,0.5389908256880734,0.6077981651376146,0.022935779816513735,0.6077981651376146,0.022935779816513735,0.6077981651376146,0.011467889908256867,0.022935779816513735,0.6077981651376146,0.011467889908256867,0.022935779816513735,0.022935779816513735,0.011467889908256867,0.5275229357798167,0.5963302752293579,0.5963302752293579,0.022935779816513735,0.022935779816513735,0.5963302752293579,0.011467889908256867,0.5389908256880734,0.5275229357798167,0.2958715596330276,0.5389908256880734,0.5275229357798167,0.5275229357798167,0.0344036697247706,0.5389908256880734,0.3440366972477066,0.11467889908256879,0.022935779816513735,0.47018348623853223,0.011467889908256867,0.5160550458715597,0.011467889908256867,0.5275229357798167,0.5963302752293579,0.011467889908256867,0.011467889908256867,0.5275229357798167,0.011467889908256867,0.011467889908256867,0.5389908256880734,0.022935779816513735,0.5963302752293579,0.011467889908256867,0.022935779816513735,0.0344036697247706,0.0344036697247706,0.5275229357798167,0.0344036697247706,0.5275229357798167,0.011467889908256867,0.5275229357798167,0.05733944954128445,0.47018348623853223,0.5275229357798167,0.022935779816513735,0.5160550458715597,0.022935779816513735,0.05733944954128445,0.0344036697247706,0.0344036697247706,0.022935779816513735,0.40366972477064234,0.5275229357798167,0.5160550458715597,0.0344036697247706,0.5160550458715597,0.022935779816513735,0.5963302752293579,0.10321100917431181,0.1834862385321102,0.5275229357798167,0.5963302752293579,0.11467889908256879,0.05733944954128445,0.5160550458715597,0.5963302752293579,0.5963302752293579,0.5275229357798167,0.5160550458715597,0.05733944954128445,0.5963302752293579,0.5275229357798167,0.0344036697247706,0.022935779816513735,0.5160550458715597,0.0344036697247706,0.0344036697247706,0.08027522935779818,0.5389908256880734,0.0344036697247706,0.022935779816513735,0.0344036697247706,0.022935779816513735,0.022935779816513735,0.5275229357798167,0.5389908256880734,0.5160550458715597,0.5963302752293579,0.5963302752293579,0.5389908256880734,0.022935779816513735,0.10321100917431181,0.0344036697247706,0.0344036697247706,0.5045871559633027,0.5389908256880734,0.011467889908256867,0.0,0.0,0.022935779816513735,0.5160550458715597,0.5963302752293579,0.05733944954128445,0.5045871559633027,0.0,0.022935779816513735,0.5045871559633027,0.0344036697247706,0.5045871559633027,0.5045871559633027,0.0,0.0344036697247706,0.5389908256880734,0.11467889908256879,0.5160550458715597,0.5275229357798167,0.05733944954128445,0.022935779816513735,0.0344036697247706,0.022935779816513735,0.5045871559633027,0.022935779816513735,0.022935779816513735,0.011467889908256867,0.5275229357798167,0.5963302752293579,0.0,0.5160550458715597,0.5389908256880734,0.0344036697247706,0.5389908256880734,0.5160550458715597,0.0344036697247706,0.011467889908256867,0.5275229357798167,0.022935779816513735,0.5963302752293579,0.5045871559633027,0.5275229357798167,0.5963302752293579,0.04587155963302747,0.5275229357798167,0.5963302752293579,0.09174311926605494,0.5160550458715597,0.5963302752293579,0.5275229357798167,0.5275229357798167,0.5963302752293579,0.5275229357798167,0.5045871559633027,0.0344036697247706,0.15366972477064234,0.10321100917431181,0.5389908256880734,0.5275229357798167,0.022935779816513735,0.5275229357798167,0.0344036697247706,0.1490825688073395,0.5389908256880734,0.0344036697247706,0.5160550458715597,0.5275229357798167,0.0344036697247706,0.011467889908256867,0.5848623853211011,0.5275229357798167,0.5275229357798167,0.5275229357798167,0.0344036697247706,0.022935779816513735,0.4357798165137615,0.5848623853211011,0.0344036697247706,0.04587155963302747,0.04587155963302747,0.13761467889908252,0.5275229357798167,0.04587155963302747,0.5160550458715597,0.011467889908256867,0.13761467889908252,0.5275229357798167,0.0344036697247706,0.0344036697247706,0.5275229357798167,0.011467889908256867,0.5160550458715597,0.09174311926605494,0.0344036697247706,0.5275229357798167,0.5848623853211011,0.5848623853211011,0.0344036697247706,0.5848623853211011,0.5275229357798167,0.34174311926605505,0.5848623853211011,0.5160550458715597,0.5848623853211011,0.33715596330275244,0.5160550458715597,0.011467889908256867,0.022935779816513735,0.20871559633027525,0.0344036697247706,0.11467889908256879,0.04587155963302747,0.0344036697247706,0.5848623853211011,0.5275229357798167,0.49311926605504597,0.5160550458715597,0.5848623853211011,0.5160550458715597,0.5848623853211011,0.022935779816513735,0.5275229357798167,0.0344036697247706]},\"selected\":{\"id\":\"2044\"},\"selection_policy\":{\"id\":\"2045\"}},\"id\":\"1922\",\"type\":\"ColumnDataSource\"},{\"attributes\":{\"axis\":{\"id\":\"1905\"},\"dimension\":1,\"ticker\":null},\"id\":\"1908\",\"type\":\"Grid\"},{\"attributes\":{},\"id\":\"2041\",\"type\":\"NodesOnly\"},{\"attributes\":{},\"id\":\"2044\",\"type\":\"Selection\"},{\"attributes\":{},\"id\":\"2030\",\"type\":\"BasicTickFormatter\"},{\"attributes\":{},\"id\":\"2028\",\"type\":\"AllLabels\"},{\"attributes\":{},\"id\":\"1910\",\"type\":\"WheelZoomTool\"},{\"attributes\":{\"end\":10.1,\"start\":-10.1},\"id\":\"1891\",\"type\":\"Range1d\"},{\"attributes\":{},\"id\":\"2031\",\"type\":\"AllLabels\"},{\"attributes\":{\"source\":{\"id\":\"1926\"}},\"id\":\"1928\",\"type\":\"CDSView\"},{\"attributes\":{\"fill_color\":{\"field\":\"node_color\",\"transform\":{\"id\":\"1930\"}},\"size\":{\"value\":10}},\"id\":\"1931\",\"type\":\"Circle\"},{\"attributes\":{},\"id\":\"1909\",\"type\":\"PanTool\"},{\"attributes\":{\"edge_renderer\":{\"id\":\"1927\"},\"inspection_policy\":{\"id\":\"2040\"},\"layout_provider\":{\"id\":\"1929\"},\"node_renderer\":{\"id\":\"1923\"},\"selection_policy\":{\"id\":\"2041\"}},\"id\":\"1920\",\"type\":\"GraphRenderer\"},{\"attributes\":{\"callback\":null,\"tooltips\":[[\"Index\",\"@index\"],[\"Activity\",\"@activity\"]]},\"id\":\"1913\",\"type\":\"HoverTool\"},{\"attributes\":{},\"id\":\"2043\",\"type\":\"UnionRenderers\"},{\"attributes\":{\"formatter\":{\"id\":\"2027\"},\"major_label_policy\":{\"id\":\"2028\"},\"ticker\":{\"id\":\"1902\"}},\"id\":\"1901\",\"type\":\"LinearAxis\"},{\"attributes\":{\"text\":\"Activity cliffs on the beta-lactamase dataset\"},\"id\":\"1893\",\"type\":\"Title\"},{\"attributes\":{},\"id\":\"1906\",\"type\":\"BasicTicker\"},{\"attributes\":{\"axis\":{\"id\":\"1901\"},\"ticker\":null},\"id\":\"1904\",\"type\":\"Grid\"},{\"attributes\":{\"formatter\":{\"id\":\"2030\"},\"major_label_policy\":{\"id\":\"2031\"},\"ticker\":{\"id\":\"1906\"}},\"id\":\"1905\",\"type\":\"LinearAxis\"},{\"attributes\":{\"data\":{\"end\":[10126,50501,55205,5013,50922,12409,6335,9528,686,16090,29586,23469,35992,1993,28954,1879,57599,29586,62457,56116,315,6723,54647,54411,59090,11540,12623,24431,49737,240,9678,17521,24415,56244,60066,1270,2444,54995,8942,51532,62138,34722,57978,1570,8947,62926,61923,61951,324,53551,53821,823,60027,3307,3795,340,3550,1267,49656,56963,33311,9065,60274,879,55662,5351,1270,59296,4675,10182,38562,58074,54535,33311,38513,33311,51771,41901,33311,50711,38513,33311,3563,33311,11207,6897,5294,56575,52922,9458,62233,5234,38513,7964,38513,62433,10092,56837,9607,58374,53220,8842,50333,48323,3351,60920,1548,1977,58037,1893,62771,1001,5955,54894,9712,1001,62313,42143,60452,54753,878,7203,7695,3748,5703,54279,5903,53013,9911,58190,1198,50586,56393,51122,52446,9777,2953,57294,62814,6099,7209,46229,2986,44292,5087,2986,1190,40716,5713,52409,56403,56294,3046,62833,11631,11882,56963,54753,1874,11598,3705,40694,5816,11379,61193,1481,10186,60855,58477,50348,7573,1347,1901,55105,3449,46632,56744,50939,53171,42929,58550,58585,7614,54954,11621,56670,1743,7889,6077,61119,3830,1767,3794,11788,50926,5656,61329,1868,1997,7824,58803,5634,8030,5734,53010,46906,53076,44657,55015,12226,10035,61225],\"start\":[55299,2063,12306,57368,10282,59444,59446,53312,45123,69,75,76,77,61517,83,41045,12373,89,2137,8286,39012,55411,10362,4219,12417,51331,59525,140,8334,32911,61588,151,153,10402,10402,45224,61609,10413,61615,6322,12468,190,4292,41157,55526,10473,12526,8435,30972,2300,255,43276,2328,61731,61731,37164,49461,61753,2364,8512,324,61764,2377,55629,12623,55632,55639,12641,59754,55659,366,6512,8560,370,370,371,2425,378,392,2444,399,400,57743,402,61841,57752,49574,431,4529,51651,456,61896,473,61929,490,12780,59886,10751,61959,2569,2581,49688,8731,553,51760,568,53821,49727,6723,53829,12880,49745,55892,10854,55914,57969,8817,638,12930,10887,49807,53906,58007,60056,51902,4805,58055,8905,56015,2778,58087,8941,8942,8944,4854,62199,47865,2812,771,56067,56067,774,58132,790,62285,60242,56178,885,62334,9099,2963,9116,52127,13243,62404,60359,9162,971,62416,62419,62436,1001,62457,52231,9242,52252,50224,13371,7240,9294,50265,54378,52333,11410,56467,1172,5277,1182,11429,1191,5288,9386,54452,9400,54465,3279,52436,58594,56549,3325,52489,62744,62768,58676,9528,52582,11622,42367,56732,54693,11692,56751,62926,54775,11788,1552,1593,1624,7809,52884,55015,9987]},\"selected\":{\"id\":\"2042\"},\"selection_policy\":{\"id\":\"2043\"}},\"id\":\"1926\",\"type\":\"ColumnDataSource\"},{\"attributes\":{\"high\":1,\"low\":0,\"palette\":[\"#440154\",\"#440255\",\"#440357\",\"#450558\",\"#45065A\",\"#45085B\",\"#46095C\",\"#460B5E\",\"#460C5F\",\"#460E61\",\"#470F62\",\"#471163\",\"#471265\",\"#471466\",\"#471567\",\"#471669\",\"#47186A\",\"#48196B\",\"#481A6C\",\"#481C6E\",\"#481D6F\",\"#481E70\",\"#482071\",\"#482172\",\"#482273\",\"#482374\",\"#472575\",\"#472676\",\"#472777\",\"#472878\",\"#472A79\",\"#472B7A\",\"#472C7B\",\"#462D7C\",\"#462F7C\",\"#46307D\",\"#46317E\",\"#45327F\",\"#45347F\",\"#453580\",\"#453681\",\"#443781\",\"#443982\",\"#433A83\",\"#433B83\",\"#433C84\",\"#423D84\",\"#423E85\",\"#424085\",\"#414186\",\"#414286\",\"#404387\",\"#404487\",\"#3F4587\",\"#3F4788\",\"#3E4888\",\"#3E4989\",\"#3D4A89\",\"#3D4B89\",\"#3D4C89\",\"#3C4D8A\",\"#3C4E8A\",\"#3B508A\",\"#3B518A\",\"#3A528B\",\"#3A538B\",\"#39548B\",\"#39558B\",\"#38568B\",\"#38578C\",\"#37588C\",\"#37598C\",\"#365A8C\",\"#365B8C\",\"#355C8C\",\"#355D8C\",\"#345E8D\",\"#345F8D\",\"#33608D\",\"#33618D\",\"#32628D\",\"#32638D\",\"#31648D\",\"#31658D\",\"#31668D\",\"#30678D\",\"#30688D\",\"#2F698D\",\"#2F6A8D\",\"#2E6B8E\",\"#2E6C8E\",\"#2E6D8E\",\"#2D6E8E\",\"#2D6F8E\",\"#2C708E\",\"#2C718E\",\"#2C728E\",\"#2B738E\",\"#2B748E\",\"#2A758E\",\"#2A768E\",\"#2A778E\",\"#29788E\",\"#29798E\",\"#287A8E\",\"#287A8E\",\"#287B8E\",\"#277C8E\",\"#277D8E\",\"#277E8E\",\"#267F8E\",\"#26808E\",\"#26818E\",\"#25828E\",\"#25838D\",\"#24848D\",\"#24858D\",\"#24868D\",\"#23878D\",\"#23888D\",\"#23898D\",\"#22898D\",\"#228A8D\",\"#228B8D\",\"#218C8D\",\"#218D8C\",\"#218E8C\",\"#208F8C\",\"#20908C\",\"#20918C\",\"#1F928C\",\"#1F938B\",\"#1F948B\",\"#1F958B\",\"#1F968B\",\"#1E978A\",\"#1E988A\",\"#1E998A\",\"#1E998A\",\"#1E9A89\",\"#1E9B89\",\"#1E9C89\",\"#1E9D88\",\"#1E9E88\",\"#1E9F88\",\"#1EA087\",\"#1FA187\",\"#1FA286\",\"#1FA386\",\"#20A485\",\"#20A585\",\"#21A685\",\"#21A784\",\"#22A784\",\"#23A883\",\"#23A982\",\"#24AA82\",\"#25AB81\",\"#26AC81\",\"#27AD80\",\"#28AE7F\",\"#29AF7F\",\"#2AB07E\",\"#2BB17D\",\"#2CB17D\",\"#2EB27C\",\"#2FB37B\",\"#30B47A\",\"#32B57A\",\"#33B679\",\"#35B778\",\"#36B877\",\"#38B976\",\"#39B976\",\"#3BBA75\",\"#3DBB74\",\"#3EBC73\",\"#40BD72\",\"#42BE71\",\"#44BE70\",\"#45BF6F\",\"#47C06E\",\"#49C16D\",\"#4BC26C\",\"#4DC26B\",\"#4FC369\",\"#51C468\",\"#53C567\",\"#55C666\",\"#57C665\",\"#59C764\",\"#5BC862\",\"#5EC961\",\"#60C960\",\"#62CA5F\",\"#64CB5D\",\"#67CC5C\",\"#69CC5B\",\"#6BCD59\",\"#6DCE58\",\"#70CE56\",\"#72CF55\",\"#74D054\",\"#77D052\",\"#79D151\",\"#7CD24F\",\"#7ED24E\",\"#81D34C\",\"#83D34B\",\"#86D449\",\"#88D547\",\"#8BD546\",\"#8DD644\",\"#90D643\",\"#92D741\",\"#95D73F\",\"#97D83E\",\"#9AD83C\",\"#9DD93A\",\"#9FD938\",\"#A2DA37\",\"#A5DA35\",\"#A7DB33\",\"#AADB32\",\"#ADDC30\",\"#AFDC2E\",\"#B2DD2C\",\"#B5DD2B\",\"#B7DD29\",\"#BADE27\",\"#BDDE26\",\"#BFDF24\",\"#C2DF22\",\"#C5DF21\",\"#C7E01F\",\"#CAE01E\",\"#CDE01D\",\"#CFE11C\",\"#D2E11B\",\"#D4E11A\",\"#D7E219\",\"#DAE218\",\"#DCE218\",\"#DFE318\",\"#E1E318\",\"#E4E318\",\"#E7E419\",\"#E9E419\",\"#ECE41A\",\"#EEE51B\",\"#F1E51C\",\"#F3E51E\",\"#F6E61F\",\"#F8E621\",\"#FAE622\",\"#FDE724\"]},\"id\":\"1930\",\"type\":\"LinearColorMapper\"},{\"attributes\":{},\"id\":\"2045\",\"type\":\"UnionRenderers\"},{\"attributes\":{},\"id\":\"1899\",\"type\":\"LinearScale\"},{\"attributes\":{\"data_source\":{\"id\":\"1926\"},\"glyph\":{\"id\":\"1936\"},\"hover_glyph\":null,\"muted_glyph\":null,\"view\":{\"id\":\"1928\"}},\"id\":\"1927\",\"type\":\"GlyphRenderer\"},{\"attributes\":{},\"id\":\"2042\",\"type\":\"Selection\"},{\"attributes\":{},\"id\":\"2040\",\"type\":\"NodesOnly\"},{\"attributes\":{},\"id\":\"2027\",\"type\":\"BasicTickFormatter\"},{\"attributes\":{},\"id\":\"1902\",\"type\":\"BasicTicker\"},{\"attributes\":{\"line_alpha\":{\"value\":0.9},\"line_width\":{\"value\":3}},\"id\":\"1936\",\"type\":\"MultiLine\"}],\"root_ids\":[\"1892\"]},\"title\":\"Bokeh Application\",\"version\":\"2.3.3\"}};\n",
+              "  var render_items = [{\"docid\":\"3f8c97d9-e724-4df6-883e-b3e38a0f79f9\",\"root_ids\":[\"1892\"],\"roots\":{\"1892\":\"48e77d22-8db0-4449-83dc-d10e7fd4017b\"}}];\n",
+              "  root.Bokeh.embed.embed_items_notebook(docs_json, render_items);\n",
+              "\n",
+              "  }\n",
+              "  if (root.Bokeh !== undefined) {\n",
+              "    embed_document(root);\n",
+              "  } else {\n",
+              "    var attempts = 0;\n",
+              "    var timer = setInterval(function(root) {\n",
+              "      if (root.Bokeh !== undefined) {\n",
+              "        clearInterval(timer);\n",
+              "        embed_document(root);\n",
+              "      } else {\n",
+              "        attempts++;\n",
+              "        if (attempts > 100) {\n",
+              "          clearInterval(timer);\n",
+              "          console.log(\"Bokeh: ERROR: Unable to run BokehJS code because BokehJS library is missing\");\n",
+              "        }\n",
+              "      }\n",
+              "    }, 10, root)\n",
+              "  }\n",
+              "})(window);"
+            ],
+            "application/vnd.bokehjs_exec.v0+json": ""
+          },
+          "metadata": {
+            "application/vnd.bokehjs_exec.v0+json": {
+              "id": "1892"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "gvMiuxgi_vKw"
+      },
+      "source": [
+        "A nice addition to this Notebook would be the option to visualize the molecular structure when hovering over each point. I tried, but could not make it work, so the index of the compound and its pChEMBL value show up instead. \n",
+        "\n",
+        "If you want to visualize an activity cliff pair or cluster, take note of the indexes on the variable `mol_indexes` below and run the cell to output a list of structures with corresponding pChEMBL values.\n",
+        "\n",
+        "Let's take a look at the cliff formed between structures 75 and 29589:"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "3bBmMFzAso_Q",
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 317
+        },
+        "outputId": "03c19754-2d89-41e3-e468-5f2166385fb2"
+      },
+      "source": [
+        "mol_indexes = [75, 29586]\n",
+        "\n",
+        "ms = []\n",
+        "leg = []\n",
+        "\n",
+        "for ind in mol_indexes:\n",
+        "    ms.append(cliff_df.loc[ind][\"rdkit_mol\"])\n",
+        "    leg.append(f'Index: {str(ind)}, Activity: {str(cliff_df.loc[ind][\"pchembl_value\"])}')\n",
+        "\n",
+        "img = Draw.MolsToGridImage(ms, molsPerRow=2, subImgSize=(500, 300), legends=leg)\n",
+        "img"
+      ],
+      "execution_count": 40,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "image/png": "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c+fOHT16tPClSCT68ssvv//++3Pnzo0bN+7ixYstWrQQro02a9Zs5MiR//vf//Lz801MTCr/vQIAPZCdnX327NkePXrk5uYeO3ZMKpV27NjRwcFBWCuXyy9evBgXF2dhYREfH694lVwuP3v2bEJCgo2NTY8ePUxNTe/cuXP//v327dvb2NgQETMfO3asdu3aSofwtWnTJiIiwsvLS/iyQ4cOAwYMOHfuHBH99ddfXl5eU6ZMISKxWLx48eJNmzb98ccfnTt3TkhIsLKysrKyKrW327dvFxYW+vj4CHnr6OjYunXrGzduENHDhw9//fXX999/f8yYMcLGpqamFY+TycrK2rVr17Rp03Jycv7888/FixeXHEYik8nOnj2blJRkZ2fXs2dPZj5x4sSZM2dyc3OFT4EWLVpYWlpeu3YtPz9fLpd369ZNcbjU1NRLly517Njx7t27WVlZDg4ODx8+vH//fmxsbFhYmEgkqlOnTnp6eskBNvHx8dHR0b1795ZIJGVLffz4ce3atY2MjJS+ETs7O+FXmvj4+E8//VSxfM+ePdnZ2UuXLq1VqxYRderUacKECevWrUtPTxf+7UDPafkXB6gxFGfcLS0tp0yZ0qhRIxcXl3r16hkZGW3atImZMzIy/P39icje3r5+/fpCDB07dqzUhVErK6sjR47k5eW1atWqcePGwqmRo0ePisXi33//nZmPHz++YcOG8srIzMy0s7NTnCbp06fP4MGDmfnZs2fCyZiKBQcHSySShISEPXv2ENHly5cVqy5cuFC3bl2JROLs7CyRSNq2bXv27Fk3NzczMzNTU1M3Nzc3N7djx44JQ2WEk0ZHjhxRvHzKlClNmzbl/x8qs3DhQldXVyKqXbu2m5tbp06dvvzyS1NT02fPnile0r9//759+zLz7t27d+/eXarUwMBAsVi8bds24cuvvvrK2Nj43r175b21wsJCYchm2VWffPIJEaWnp7/0+wMAekM44y40uHPnzq1Vq5abm5sw4iI8PJyZ79692759eyJycnIShtsRUXZ29uPHj1u3bi2VSl1dXY2NjRs2bHj//v2HDx/a2dkJZ82Z+aeffjI2Nr506RIz79ixY9++fRUXM2LECEtLS2Z2cnJ6/fXXS67y9vbu3r07M3/44YfNmjVj5szMTGHUnyAxMVEqlXbu3DkpKYmZ09PT7e3tx48f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\n",
+            "text/plain": [
+              "<PIL.PngImagePlugin.PngImageFile image mode=RGB size=1000x300 at 0x7F2492BABA50>"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 40
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "dhPqHrWaso_R"
+      },
+      "source": [
+        "See that a simple stereochemistry change at the bond to the oxygen ester makes a huge impact in activity (one stereoisomer is 1000x more active than the other)."
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "jev0LqLmQBIX"
+      },
+      "source": [
+        ""
+      ],
+      "execution_count": null,
+      "outputs": []
+    }
+  ]
+}
