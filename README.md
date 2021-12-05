@@ -12,12 +12,13 @@ This is the project inspired from [Data Professor](https://www.youtube.com/chann
 ```
 Beta Lactamase 
           |
-          |______ IPYNB
-          |______ code
-          |_______ Data Professor's Dir
+          |_______ IPYNB
+          |_______ code
+          |_______ Data_professor_Dir
+          |_______ code
 ```
 
-In the `IPYNB` dir there will all my approaches, from feature engineering to building the whole pipeline in doing the regression tasks of predicting the pchembl_value as well as  several SSL tasks and generative tasks. Those tasks include mainly genetative tasks of molecules geneations as well as downstream tasks of node classification, Graph Clustering, etc. The `code` dir contains the finalised tasks based on approaches made in the IPYNB files. and `Data Professor's` dir, is the dir that contains the starter files and data as per his video. 
+In the `IPYNB` dir there will all my approaches, from feature engineering to building the whole pipeline in doing the regression tasks of predicting the pchembl_value as well as  several SSL tasks and generative tasks. Those tasks include mainly genetative tasks of molecules geneations as well as downstream tasks of node classification, Graph Clustering, etc. The `code` dir contains the finalised tasks based on approaches made in the IPYNB files. and `Data_Professor_dir`, is the dir that contains the starter files and data as per his video. The `Data` dir is the dir containing the dataset used in the zip format provided by Data Professor sir. 
 
 
 ## Updates of work done till now:
