@@ -7,7 +7,7 @@ This is the project inspired from [Data Professor](https://www.youtube.com/chann
 "Data/logo.jpg" 
          alt="Food and Computer Image" 
          align="right"
-         width="300" height="300"> 
+         width="400" height="300"> 
 
 ```
 Beta Lactamase 
