@@ -1,0 +1,6 @@
+processed
+test_data.csv
+train_data.csv
+__pycache__
+src/trained_model.pth
+src/__pycache__

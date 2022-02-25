@@ -4,7 +4,7 @@ This is the project inspired from [Data Professor](https://www.youtube.com/chann
 
 
 <img src= 
-"Data/logo.jpg" 
+"Data/images/logo.jpg" 
          alt="Food and Computer Image" 
          align="right"
          width="400" height="300"> 
@@ -15,7 +15,7 @@ Beta Lactamase
           |_______ IPYNB
           |_______ code
           |_______ Data_professor_Dir
-          |_______ code
+          |_______ src
 ```
 
 In the `IPYNB` dir there will all my approaches, from feature engineering to building the whole pipeline in doing the regression tasks of predicting the pchembl_value as well as  several SSL tasks and generative tasks. Those tasks include mainly genetative tasks of molecules geneations as well as downstream tasks of node classification, Graph Clustering, etc. The `code` dir contains the finalised tasks based on approaches made in the IPYNB files. and `Data_Professor_dir`, is the dir that contains the starter files and data as per his video. The `Data` dir is the dir containing the dataset used in the zip format provided by Data Professor sir. 
@@ -23,11 +23,4 @@ In the `IPYNB` dir there will all my approaches, from feature engineering to bui
 
 ## Updates of work done till now:
 
-Till now, the changes commited and made now is the analysis of the data provided by sir, and done a complete analysis of those. And as that is completed, now
-tha main tasks is to organize the unstable data with Graph Augmentations.
 
-## Works doing now for future commits:
-
-1. Using Graph augmentations, to create random relative structural changes of the graphs, for more data.
-2. Using those data to create some starter approaches to perform the main task of regression, i.e. calculating the pchembl_value values.
-3. Doing some further researches on SSL approaches, as well some downstream tasks followed by generative modellings.
