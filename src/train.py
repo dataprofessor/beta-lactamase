@@ -44,7 +44,7 @@ model = GNN(
 model = model.to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 criterion = torch.nn.MSELoss()
-#scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.1)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.1)
 
 def train(model, optimizer, criterion):
     running_loss = 0.0
@@ -89,7 +89,7 @@ begin_test_loss = 0.0
 step = 5
 count = 0
 
-for epoch in tqdm(range(1, 11)):
+for epoch in tqdm(range(1, 6)):
     current_train_loss = train(model, optimizer, criterion)
     current_test_loss = test(model, criterion)
     if epoch == 1:
@@ -108,7 +108,7 @@ for epoch in tqdm(range(1, 11)):
         torch.save(model, "trained_model.pth")
         count = 0
     
-    if count >= 5:
+    if count >= 3:
         print("Early stopping ...")
         break
 
@@ -116,5 +116,5 @@ plt.figure(figsize=(10, 7))
 plt.plot(train_loss)
 plt.plot(test_loss)
 plt.legend(["Train loss", "Test Loss"])
-plt.title("The curve showing the loss curve per batch for both train and test.")
+plt.title("The curve showing the loss curve per epoch for both train and test.")
 plt.show()
