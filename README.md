@@ -35,6 +35,8 @@ Till now, the dataprerocessing part, a detailed analysis is been done on the dat
 These are some results of our model which are captured during training. 
 ![alt-text-1](Data/images/losscurve1.png "title-1") ![alt-text-2](Data/images/losscurve2.png "title-2")
 
+As we can see that after 2 epochs the model is trying to get overfitted, so applied early stop and conditional model state saving based on the improvement of the metrics has also been implemented.
+
 ## Future updates in this works:
 The possible future pipeline of this project could be:
 1. Making a model which will be much robust and efficient than the baseline and will perform regression and potential classification based task at the same time.
